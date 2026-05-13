@@ -475,19 +475,40 @@ async def fetch_all_jobs() -> List[Job]:
     logger.info("=== Starting full job fetch from all sources ===")
 
     # ---- Phase 1: API sources (fast, concurrent) ----
+    # NOTE: python-jobspy (Indeed/Google scraping) is excluded in production because
+    # cloud hosting IPs (Render, AWS etc) are blocked by Indeed/Google anti-scraping.
+    # We use Remotive heavily instead — it has 100+ jobs per category, no key needed.
     api_tasks = [
-        # RemoteOK (remote tech/data jobs)
+        # RemoteOK (remote tech/data jobs, no key needed)
         fetch_remoteok_jobs(),
-        # Remotive (remote jobs, two categories)
+
+        # Remotive — expanded to cover ALL major categories (no key needed, 100 jobs each)
         fetch_remotive_jobs(category="software-dev", search="python"),
+        fetch_remotive_jobs(category="software-dev", search="machine learning"),
+        fetch_remotive_jobs(category="software-dev", search="data science"),
+        fetch_remotive_jobs(category="software-dev", search="AI engineer"),
+        fetch_remotive_jobs(category="software-dev", search="backend"),
+        fetch_remotive_jobs(category="software-dev", search="full stack"),
         fetch_remotive_jobs(category="data"),
-        # Adzuna (international)
+        fetch_remotive_jobs(category="data", search="python"),
+        fetch_remotive_jobs(category="data", search="analytics"),
+        fetch_remotive_jobs(category="devops-sysadmin"),
+        fetch_remotive_jobs(category="product"),
+        fetch_remotive_jobs(category="all", search="python developer"),
+        fetch_remotive_jobs(category="all", search="django fastapi"),
+        fetch_remotive_jobs(category="all", search="deep learning nlp"),
+        fetch_remotive_jobs(category="all", search="MLOps"),
+
+        # Adzuna (international, requires ADZUNA_APP_ID + ADZUNA_APP_KEY)
+        # These will return [] if keys are not set — add keys in Render env vars for more jobs
         fetch_adzuna_jobs(query="data science python remote", country="gb"),
         fetch_adzuna_jobs(query="machine learning AI remote", country="us"),
         fetch_adzuna_jobs(query="data science python", country="in"),
         fetch_adzuna_jobs(query="data science python", country="pk"),
         fetch_adzuna_jobs(query="software developer python", country="pk"),
-        # JSearch (Pakistan-specific via RapidAPI)
+
+        # JSearch / RapidAPI (requires JSEARCH_API_KEY, free 200 req/month)
+        # These will return [] if key not set
         fetch_jsearch_jobs(query="data science in Karachi Pakistan"),
         fetch_jsearch_jobs(query="python developer in Pakistan"),
         fetch_jsearch_jobs(query="machine learning in Lahore Pakistan"),
@@ -503,12 +524,15 @@ async def fetch_all_jobs() -> List[Job]:
         elif isinstance(result, list):
             all_jobs.extend(result)
 
-    # ---- Phase 2: JobSpy scraping for Pakistan cities (slower) ----
+    # ---- Phase 2: JobSpy scraping — only runs locally, blocked by cloud IPs ----
+    # Attempt anyway; if it fails/returns nothing that's expected in production
     try:
         pakistan_jobs = await fetch_jobspy_pakistan_jobs()
-        all_jobs.extend(pakistan_jobs)
+        if pakistan_jobs:
+            logger.info(f"JobSpy returned {len(pakistan_jobs)} jobs (local dev only)")
+            all_jobs.extend(pakistan_jobs)
     except Exception as e:
-        logger.error(f"JobSpy Pakistan fetch failed: {e}")
+        logger.warning(f"JobSpy skipped (expected on cloud): {e}")
 
     # Deduplicate by normalized title + company
     seen: set[str] = set()
