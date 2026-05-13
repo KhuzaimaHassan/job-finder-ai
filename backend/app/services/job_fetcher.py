@@ -22,6 +22,24 @@ from app.models.schemas import Job
 
 logger = logging.getLogger(__name__)
 
+
+def _clean_description(html: str) -> str:
+    """
+    Clean job description HTML:
+    - Remove empty/whitespace-only <p> tags (e.g. <p>&nbsp;</p>, <p> </p>)
+    - Collapse 3+ consecutive <br> into 2
+    - Trim excessive leading/trailing whitespace inside tags
+    """
+    if not html:
+        return html
+    # Remove empty paragraphs (with only whitespace or &nbsp;)
+    html = re.sub(r'<p\b[^>]*>\s*(&nbsp;|\s)*\s*</p>', '', html, flags=re.IGNORECASE)
+    # Collapse 3+ consecutive <br> tags into a single one
+    html = re.sub(r'(<br\s*/?>[\s]*){3,}', '<br/><br/>', html, flags=re.IGNORECASE)
+    # Remove empty <li> items
+    html = re.sub(r'<li\b[^>]*>\s*(&nbsp;|\s)*\s*</li>', '', html, flags=re.IGNORECASE)
+    return html.strip()
+
 # ---------------------------------------------------------------------------
 # In-memory job store (dict keyed by job id)
 # ---------------------------------------------------------------------------
@@ -101,7 +119,7 @@ async def fetch_adzuna_jobs(
                     salary=_format_salary(
                         item.get("salary_min"), item.get("salary_max")
                     ),
-                    description=item.get("description", "")[:10000],
+                    description=_clean_description(item.get("description", ""))[:10000],
                     url=item.get("redirect_url", ""),
                     source="adzuna",
                     posted_date=item.get("created", ""),
@@ -173,7 +191,7 @@ async def fetch_remoteok_jobs() -> List[Job]:
                     salary=_format_salary(
                         item.get("salary_min"), item.get("salary_max")
                     ),
-                    description=item.get("description", "")[:10000],
+                    description=_clean_description(item.get("description", ""))[:10000],
                     url=apply_url,
                     source="remoteok",
                     posted_date=item.get("date", ""),
@@ -219,7 +237,7 @@ async def fetch_remotive_jobs(
             if not salary or salary.strip() == "":
                 salary = None
 
-            desc = item.get("description", "")[:10000]
+            desc = _clean_description(item.get("description", ""))[:10000]
 
             jobs.append(
                 Job(

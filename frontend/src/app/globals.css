@@ -128,3 +128,44 @@
     @apply font-sans;
   }
 }
+
+/* ── Job Description: collapse empty paragraphs & normalize spacing ── */
+.job-description p:empty,
+.job-description p:has(br:only-child),
+.job-description p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.job-description p:empty {
+  display: none;
+}
+.job-description ul,
+.job-description ol {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
+}
+.job-description li {
+  margin: 0.2rem 0;
+}
+.job-description li:empty {
+  display: none;
+}
+.job-description strong,
+.job-description b {
+  color: #e4e4e7;
+  font-weight: 600;
+}
+.job-description h1,
+.job-description h2,
+.job-description h3,
+.job-description h4 {
+  color: #f4f4f5;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+/* Kill the excessive whitespace that APIs inject as &nbsp; lines */
+.job-description br + br + br {
+  display: none;
+}
