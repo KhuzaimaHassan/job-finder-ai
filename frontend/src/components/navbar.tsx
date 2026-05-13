@@ -5,7 +5,6 @@ import { BriefcaseBusiness, FileText, UserCircle, LogOut, Menu } from "lucide-re
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { ThemeToggle } from "./theme-toggle";
 
 export function Navbar() {
   const { user, signOut } = useAuth();
@@ -62,7 +61,6 @@ export function Navbar() {
           </div>
 
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             {user && (
               <div className="relative">
                 <button
