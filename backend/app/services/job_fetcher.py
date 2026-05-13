@@ -101,7 +101,7 @@ async def fetch_adzuna_jobs(
                     salary=_format_salary(
                         item.get("salary_min"), item.get("salary_max")
                     ),
-                    description=item.get("description", "")[:2000],
+                    description=item.get("description", "")[:10000],
                     url=item.get("redirect_url", ""),
                     source="adzuna",
                     posted_date=item.get("created", ""),
@@ -173,9 +173,7 @@ async def fetch_remoteok_jobs() -> List[Job]:
                     salary=_format_salary(
                         item.get("salary_min"), item.get("salary_max")
                     ),
-                    description=re.sub(
-                        r"<[^>]+>", "", item.get("description", "")
-                    )[:2000],
+                    description=item.get("description", "")[:10000],
                     url=apply_url,
                     source="remoteok",
                     posted_date=item.get("date", ""),
@@ -221,7 +219,7 @@ async def fetch_remotive_jobs(
             if not salary or salary.strip() == "":
                 salary = None
 
-            desc = re.sub(r"<[^>]+>", "", item.get("description", ""))[:2000]
+            desc = item.get("description", "")[:10000]
 
             jobs.append(
                 Job(

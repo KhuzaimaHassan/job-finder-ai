@@ -176,12 +176,8 @@ export default function JobDetailPage() {
                 <div className="prose prose-invert max-w-none prose-p:text-zinc-300 prose-a:text-indigo-400">
                   <h3 className="text-lg font-semibold text-white mb-3">Job Description</h3>
                   <div 
-                    className="text-sm text-zinc-300 leading-relaxed space-y-4"
-                    dangerouslySetInnerHTML={{ 
-                      __html: job.description
-                        .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines
-                        .replace(/\n/g, '<br/>') // Convert remaining newlines to breaks
-                    }}
+                    className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap"
+                    dangerouslySetInnerHTML={{ __html: job.description }}
                   />
                 </div>
               </div>
