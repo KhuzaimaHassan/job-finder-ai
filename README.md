@@ -6,7 +6,7 @@
 
 **An AI-powered full-stack job matching platform that analyzes your resume, finds the best-fit jobs, and prepares you for interviews — all in one place.**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://job-finder-ai.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://job-finder-ai-kappa.vercel.app)
 [![Backend API](https://img.shields.io/badge/Backend%20API-Render-46E3B7?style=for-the-badge&logo=render)](https://job-finder-ai-backend.onrender.com)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
