@@ -93,22 +93,22 @@ export default function DashboardPage() {
           {/* Hero Section */}
           <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-6">
             <div className="text-center mb-8">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-3">
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-3">
                 Find Your Dream{" "}
                 <span className="bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 bg-clip-text text-transparent">
                   Data Science
                 </span>{" "}
                 Job
               </h2>
-              <p className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto mb-8">
+              <p className="text-gray-400 text-sm sm:text-base max-w-2xl mx-auto mb-8 px-4">
                 Real-time jobs matched to your resume and skills
               </p>
               
-              <div className="flex justify-center mb-8">
-                <div className="bg-zinc-900/80 p-1 rounded-xl border border-zinc-800 inline-flex">
+              <div className="flex justify-center mb-8 px-4">
+                <div className="bg-zinc-900/80 p-1 rounded-xl border border-zinc-800 inline-flex w-full max-w-xs sm:w-auto">
                   <button
                     onClick={() => { setMatchMode("all"); setPage(1); }}
-                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
                       matchMode === "all" 
                         ? "bg-zinc-800 text-white shadow-sm" 
                         : "text-zinc-400 hover:text-zinc-200"
@@ -119,7 +119,7 @@ export default function DashboardPage() {
                   </button>
                   <button
                     onClick={() => { setMatchMode("matched"); setPage(1); }}
-                    className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
                       matchMode === "matched" 
                         ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shadow-sm" 
                         : "text-zinc-400 hover:text-zinc-200"
@@ -201,21 +201,21 @@ export default function DashboardPage() {
 
           {/* Pagination */}
           {!loading && total > 20 && (
-            <div className="flex items-center justify-center gap-3 mt-10">
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-10">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="px-5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 ← Previous
               </button>
-              <span className="text-sm text-gray-400 px-4">
-                {page} / {Math.ceil(total / 20)}
+              <span className="text-sm text-gray-400 px-2">
+                Page {page} of {Math.ceil(total / 20)}
               </span>
               <button
                 onClick={() => setPage((p) => p + 1)}
                 disabled={!hasMore}
-                className="px-5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Next →
               </button>

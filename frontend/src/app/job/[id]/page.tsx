@@ -128,7 +128,7 @@ export default function JobDetailPage() {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                  <div className="flex flex-col xs:flex-row sm:flex-row items-stretch gap-3 w-full sm:w-auto mt-4 lg:mt-0">
                     <button
                       onClick={async () => {
                         try {
@@ -142,7 +142,7 @@ export default function JobDetailPage() {
                           import("sonner").then(m => m.toast.error("Failed to add to tracker"));
                         }
                       }}
-                      className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-medium transition-colors whitespace-nowrap"
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-medium transition-colors whitespace-nowrap text-sm"
                     >
                       Add to Tracker
                     </button>
@@ -150,7 +150,7 @@ export default function JobDetailPage() {
                       href={job.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors whitespace-nowrap"
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors whitespace-nowrap text-sm"
                     >
                       Apply Now <ExternalLink className="w-4 h-4" />
                     </a>

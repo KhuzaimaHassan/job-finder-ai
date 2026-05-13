@@ -103,9 +103,9 @@ export default function ResumePage() {
             </p>
           </div>
 
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-8 backdrop-blur-sm mb-8">
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 sm:p-8 backdrop-blur-sm mb-8">
             <div 
-              className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-colors
+              className={`border-2 border-dashed rounded-xl p-6 sm:p-10 flex flex-col items-center justify-center transition-colors
                 ${file ? "border-indigo-500/50 bg-indigo-500/5" : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-500"}
                 ${error ? "border-red-500/50 bg-red-500/5" : ""}
               `}

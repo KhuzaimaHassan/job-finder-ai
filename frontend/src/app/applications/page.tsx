@@ -102,26 +102,31 @@ export default function ApplicationsPage() {
         <Navbar />
         <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold mb-4">Application Tracker</h1>
-            <div className="flex flex-wrap gap-4">
-              <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 min-w-[120px]">
+            <h1 className="text-xl sm:text-2xl font-bold mb-4">Application Tracker</h1>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3">
                 <p className="text-zinc-400 text-xs font-medium uppercase tracking-wider mb-1">Total</p>
                 <p className="text-2xl font-bold text-white">{stats.total}</p>
               </div>
-              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-4 py-3 min-w-[120px]">
+              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-4 py-3">
                 <p className="text-indigo-400 text-xs font-medium uppercase tracking-wider mb-1">Applied</p>
                 <p className="text-2xl font-bold text-indigo-300">{stats.applied}</p>
               </div>
-              <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3 min-w-[120px]">
+              <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
                 <p className="text-purple-400 text-xs font-medium uppercase tracking-wider mb-1">Interviews</p>
                 <p className="text-2xl font-bold text-purple-300">{stats.interviews}</p>
               </div>
-              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3 min-w-[120px]">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
                 <p className="text-emerald-400 text-xs font-medium uppercase tracking-wider mb-1">Offers</p>
                 <p className="text-2xl font-bold text-emerald-300">{stats.offers}</p>
               </div>
             </div>
           </div>
+
+          {/* Mobile scroll hint */}
+          <p className="text-xs text-zinc-500 mb-3 sm:hidden flex items-center gap-1">
+            ← Swipe horizontally to see all columns →
+          </p>
 
           <DragDropContext onDragEnd={onDragEnd}>
             <div className="flex gap-6 overflow-x-auto pb-8 items-start snap-x">
