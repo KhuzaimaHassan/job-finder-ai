@@ -28,7 +28,28 @@ from typing import List, Optional
 from app.config import settings
 from app.models.schemas import Job
 
+try:
+    from supabase import create_client as _sb_create
+    _sb_available = True
+except ImportError:
+    _sb_available = False
+
 logger = logging.getLogger(__name__)
+
+
+def _get_supabase_client():
+    """Return a Supabase client using the service role key (write access)."""
+    if not _sb_available:
+        return None
+    url = settings.SUPABASE_URL
+    key = settings.SUPABASE_SERVICE_KEY or settings.SUPABASE_KEY
+    if not url or not key:
+        return None
+    try:
+        return _sb_create(url, key)
+    except Exception as e:
+        logger.warning(f"Supabase client init failed: {e}")
+        return None
 
 
 def _clean_description(html: str) -> str:
@@ -588,10 +609,9 @@ async def fetch_himalayas_jobs(
             company = (item.get("companyName") or item.get("company_name") or "Unknown").strip()
             desc = _clean_description(item.get("description") or "")[:10000]
 
-            # Relevance check
+            # Himalayas is a curated remote tech board — no keyword gating needed.
+            # All results from a targeted search query are already relevant.
             combined = f"{title} {desc[:500]}".lower()
-            if not any(kw in combined for kw in relevant_keywords):
-                continue
 
             # Location
             locations = item.get("locationRestrictions") or []
@@ -712,11 +732,115 @@ async def fetch_jobicy_jobs(
 
 
 # ===========================================================================
+# SUPABASE PERSISTENCE
+# ===========================================================================
+async def fetch_jobs_from_supabase() -> List[Job]:
+    """
+    Load all jobs stored in Supabase into memory.
+    Called on startup so production backend has data immediately,
+    even before the API fetch cycle completes.
+    """
+    client = _get_supabase_client()
+    if not client:
+        logger.warning("Supabase not configured — skipping DB load")
+        return []
+
+    try:
+        # Fetch in batches (Supabase default limit is 1000)
+        all_rows = []
+        batch_size = 1000
+        offset = 0
+        while True:
+            result = (
+                client.table("jobs")
+                .select("*")
+                .order("fetched_at", desc=True)
+                .range(offset, offset + batch_size - 1)
+                .execute()
+            )
+            rows = result.data or []
+            all_rows.extend(rows)
+            if len(rows) < batch_size:
+                break
+            offset += batch_size
+
+        jobs: List[Job] = []
+        for row in all_rows:
+            try:
+                jobs.append(Job(
+                    id=row["id"],
+                    title=row["title"],
+                    company=row["company"],
+                    location=row.get("location", ""),
+                    salary=row.get("salary"),
+                    description=row.get("description", ""),
+                    url=row.get("url", ""),
+                    source=row.get("source", "supabase"),
+                    posted_date=row.get("posted_date"),
+                    tags=row.get("tags") or [],
+                    job_type=row.get("job_type"),
+                ))
+            except Exception:
+                continue
+
+        logger.info(f"Supabase: loaded {len(jobs)} persisted jobs")
+        return jobs
+
+    except Exception as e:
+        logger.error(f"Supabase load error: {e}")
+        return []
+
+
+async def persist_jobs_to_supabase(jobs: List[Job]) -> None:
+    """
+    Upsert API-fetched jobs into Supabase so they survive Render restarts
+    and are available to local scraper runs.
+    """
+    client = _get_supabase_client()
+    if not client or not jobs:
+        return
+
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    batch_size = 200
+    total = 0
+    for i in range(0, len(jobs), batch_size):
+        batch = [
+            {
+                "id": j.id,
+                "title": j.title,
+                "company": j.company,
+                "location": j.location,
+                "salary": j.salary,
+                "description": j.description[:8000],  # keep under Supabase limits
+                "url": j.url,
+                "source": j.source,
+                "posted_date": j.posted_date,
+                "tags": j.tags,
+                "job_type": j.job_type,
+                "fetched_at": now,
+            }
+            for j in jobs[i:i + batch_size]
+        ]
+        try:
+            client.table("jobs").upsert(batch, on_conflict="id").execute()
+            total += len(batch)
+        except Exception as e:
+            logger.warning(f"Supabase persist batch failed: {e}")
+
+    logger.info(f"Supabase: persisted {total} jobs")
+
+
+# ===========================================================================
 # AGGREGATOR - fetch all, deduplicate, filter, cache
 # ===========================================================================
 async def fetch_all_jobs() -> List[Job]:
     """Fetch jobs from ALL sources, deduplicate, filter location, and cache."""
     logger.info("=== Starting full job fetch from all sources ===")
+
+    # ---- Phase 0: Load persisted jobs from Supabase (instant — no API calls) ----
+    supabase_jobs = await fetch_jobs_from_supabase()
 
     # ---- Phase 1: API sources (fast, concurrent) ----
     api_tasks = [
@@ -798,6 +922,13 @@ async def fetch_all_jobs() -> List[Job]:
     removed = len(all_jobs) - len(filtered_jobs)
     logger.info(f"Location filter: kept {len(filtered_jobs)}, removed {removed} non-relevant onsite jobs")
 
+    # ---- Phase 4: Merge Supabase jobs (already filtered when uploaded) ----
+    # Add Supabase jobs that aren't already in the API results
+    api_ids = {j.id for j in filtered_jobs}
+    new_from_db = [j for j in supabase_jobs if j.id not in api_ids]
+    logger.info(f"Supabase: adding {len(new_from_db)} additional persisted jobs")
+    filtered_jobs.extend(new_from_db)
+
     # Deduplicate by normalized title + company
     seen: set[str] = set()
     unique_jobs: List[Job] = []
@@ -812,6 +943,12 @@ async def fetch_all_jobs() -> List[Job]:
     _job_store = {job.id: job for job in unique_jobs}
 
     logger.info(f"=== Total: {len(unique_jobs)} unique jobs cached ===")
+
+    # ---- Phase 5: Persist API results to Supabase (background, non-blocking) ----
+    # Only persist API-sourced jobs (not the ones we already loaded from Supabase)
+    api_only = [j for j in unique_jobs if j.id not in {s.id for s in supabase_jobs}]
+    asyncio.create_task(persist_jobs_to_supabase(api_only))
+
     return unique_jobs
 
 
