@@ -990,12 +990,23 @@ def search_jobs(
 
     # Location filter
     if location:
-        loc = location.lower()
+        loc = location.lower().strip()
         if loc == "remote":
             jobs = [
-                j
-                for j in jobs
+                j for j in jobs
                 if j.job_type == "remote" or "remote" in j.location.lower()
+            ]
+        elif loc in ("pakistan", "pk"):
+            # "Pakistan" filter should match ALL Pakistani cities, not just the
+            # literal word "pakistan" (jobs are often stored as "Karachi" or "Lahore, PK")
+            pk_terms = {
+                "pakistan", " pk", ",pk", "karachi", "lahore", "islamabad",
+                "rawalpindi", "peshawar", "faisalabad", "multan", "quetta",
+                "sialkot", "gujranwala", "abbottabad", "hyderabad, pak",
+            }
+            jobs = [
+                j for j in jobs
+                if any(term in j.location.lower() for term in pk_terms)
             ]
         else:
             jobs = [j for j in jobs if loc in j.location.lower()]
