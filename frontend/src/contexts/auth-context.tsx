@@ -58,7 +58,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/dashboard`,
+        // Redirect to the callback handler, NOT directly to /dashboard.
+        // The callback route exchanges the one-time code for a session,
+        // then redirects cleanly to /dashboard with NO tokens in the URL.
+        redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
   };
