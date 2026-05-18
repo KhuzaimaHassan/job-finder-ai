@@ -760,12 +760,16 @@ async def fetch_all_jobs() -> List[Job]:
         fetch_adzuna_jobs(query="machine learning AI remote", country="us"),
         fetch_adzuna_jobs(query="data science python remote", country="in"),
 
-        # JSearch / RapidAPI (requires JSEARCH_API_KEY, free 200 req/month)
-        # These return Pakistan-specific jobs when key is set
-        fetch_jsearch_jobs(query="data science in Karachi Pakistan"),
-        fetch_jsearch_jobs(query="python developer in Pakistan"),
-        fetch_jsearch_jobs(query="machine learning in Lahore Pakistan"),
-        fetch_jsearch_jobs(query="software engineer in Islamabad Pakistan"),
+        # JSearch / RapidAPI (JSEARCH_API_KEY is now set — 200 req/month free)
+        # Pakistan city-level and role-specific searches
+        fetch_jsearch_jobs(query="data science jobs in Karachi Pakistan"),
+        fetch_jsearch_jobs(query="python developer jobs in Karachi Pakistan"),
+        fetch_jsearch_jobs(query="software engineer jobs in Karachi Pakistan"),
+        fetch_jsearch_jobs(query="machine learning jobs in Lahore Pakistan"),
+        fetch_jsearch_jobs(query="data analyst jobs in Lahore Pakistan"),
+        fetch_jsearch_jobs(query="software engineer jobs in Islamabad Pakistan"),
+        fetch_jsearch_jobs(query="AI engineer jobs in Pakistan"),
+        fetch_jsearch_jobs(query="backend developer jobs in Pakistan"),
     ]
 
     api_results = await asyncio.gather(*api_tasks, return_exceptions=True)
