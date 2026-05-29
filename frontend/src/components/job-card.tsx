@@ -11,6 +11,8 @@ const SOURCE_COLORS: Record<string, string> = {
   indeed: "bg-indigo-500/15 text-indigo-400 border-indigo-500/20",
   google: "bg-teal-500/15 text-teal-400 border-teal-500/20",
   jsearch: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  himalayas: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+  jobicy: "bg-rose-500/15 text-rose-400 border-rose-500/20",
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -20,20 +22,43 @@ const SOURCE_LABELS: Record<string, string> = {
   indeed: "Indeed",
   google: "Google Jobs",
   jsearch: "JSearch",
+  himalayas: "Himalayas",
+  jobicy: "Jobicy",
 };
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "";
   try {
+    // Handle relative strings from LinkedIn/Indeed (e.g. "3 days ago", "2 weeks ago")
+    const lower = dateStr.toLowerCase().trim();
+    if (lower.includes("just") || lower.includes("hour")) return "Today";
+    if (lower === "today") return "Today";
+    if (lower === "yesterday") return "1 day ago";
+    const relMatch = lower.match(/(\d+)\s*(day|week|month|year)/);
+    if (relMatch) {
+      const n = parseInt(relMatch[1]);
+      const unit = relMatch[2];
+      if (unit === "day") return n === 1 ? "1 day ago" : `${n} days ago`;
+      if (unit === "week") return `${n}w ago`;
+      if (unit === "month") return `${n}mo ago`;
+      if (unit === "year") return `${n}y ago`;
+    }
+
+    // Parse actual date strings (ISO, YYYY-MM-DD, etc.)
     const date = new Date(dateStr);
+    // Guard against Invalid Date (new Date("garbage") doesn't throw — it returns NaN)
+    if (isNaN(date.getTime())) return "";
+
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return "Today"; // future date edge case
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     if (diffDays === 0) return "Today";
     if (diffDays === 1) return "1 day ago";
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-    return `${Math.floor(diffDays / 30)}mo ago`;
+    if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
+    return `${Math.floor(diffDays / 365)}y ago`;
   } catch {
     return "";
   }
@@ -88,9 +113,9 @@ export function JobCard({ job }: { job: Job }) {
         {/* Tags */}
         {job.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-4">
-            {job.tags.slice(0, 5).map((tag) => (
+            {[...new Set(job.tags)].slice(0, 5).map((tag, i) => (
               <span
-                key={tag}
+                key={`${tag}-${i}`}
                 className="text-[11px] px-2 py-0.5 rounded-md bg-white/[0.05] text-gray-400 border border-white/[0.06]"
               >
                 {tag}

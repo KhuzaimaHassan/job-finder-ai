@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getJob, type Job } from "@/lib/api";
+import { getJob, getProfile, getResumeInfo, createApplication, type Job } from "@/lib/api";
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
-import axios from "axios";
 
 // AI Components
 import { ATSScore } from "@/components/ai/ats-score";
@@ -35,20 +34,19 @@ export default function JobDetailPage() {
         const jobData = await getJob(jobId);
         setJob(jobData);
 
-        // Fetch User Profile and Resume
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        
+        // Fetch User Profile and Resume using the authenticated api client
+        // (raw axios won't have the Supabase JWT → 401 → AI features break)
         try {
-          const profileRes = await axios.get(`${API_URL}/api/profile`);
-          setUserProfile(profileRes.data);
+          const profile = await getProfile();
+          setUserProfile(profile);
         } catch (e) {
           console.error("Could not fetch profile", e);
         }
 
         try {
-          const resumeRes = await axios.get(`${API_URL}/api/resume`);
-          if (resumeRes.data.parsed) {
-            setResumeText(resumeRes.data.raw_text);
+          const resume = await getResumeInfo();
+          if (resume.parsed) {
+            setResumeText(resume.raw_text ?? null);
           }
         } catch (e) {
           console.error("Could not fetch resume", e);
@@ -132,11 +130,11 @@ export default function JobDetailPage() {
                     <button
                       onClick={async () => {
                         try {
-                          await import("@/lib/api").then(m => m.createApplication({
+                          await createApplication({
                             job_id: job.id,
                             job_title: job.title,
                             company: job.company
-                          }));
+                          });
                           import("sonner").then(m => m.toast.success("Added to Tracker!"));
                         } catch(e) {
                           import("sonner").then(m => m.toast.error("Failed to add to tracker"));
