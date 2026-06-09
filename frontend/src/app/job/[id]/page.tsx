@@ -7,7 +7,6 @@ import { getJob, getProfile, getResumeInfo, createApplication, type Job } from "
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
-import DOMPurify from 'dompurify';
 // AI Components
 import { ATSScore } from "@/components/ai/ats-score";
 import { CoverLetter } from "@/components/ai/cover-letter";
