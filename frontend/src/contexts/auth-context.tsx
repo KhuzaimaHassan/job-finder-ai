@@ -58,10 +58,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        // Redirect to the callback handler, NOT directly to /dashboard.
-        // The callback route exchanges the one-time code for a session,
-        // then redirects cleanly to /dashboard with NO tokens in the URL.
-        redirectTo: `${window.location.origin}/auth/callback`,
+        // Redirect directly to /dashboard.
+        // Supabase client will automatically detect the ?code= in the URL,
+        // exchange it for a session, and store it securely in local storage.
+        redirectTo: `${window.location.origin}/dashboard`,
       },
     });
   };
