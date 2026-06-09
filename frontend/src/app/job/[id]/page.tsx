@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import DOMPurify from 'dompurify';
 import { getJob, getProfile, getResumeInfo, createApplication, type Job } from "@/lib/api";
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
-
+import DOMPurify from 'dompurify';
 // AI Components
 import { ATSScore } from "@/components/ai/ats-score";
 import { CoverLetter } from "@/components/ai/cover-letter";
@@ -175,7 +176,7 @@ export default function JobDetailPage() {
                   <h3 className="text-lg font-semibold text-white mb-3">Job Description</h3>
                   <div 
                     className="job-description text-sm text-zinc-300 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: job.description }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
                   />
                 </div>
               </div>

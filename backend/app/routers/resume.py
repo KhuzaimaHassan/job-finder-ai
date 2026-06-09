@@ -37,13 +37,18 @@ async def upload_and_parse_resume(
     if len(file_bytes) > 10 * 1024 * 1024:  # 10MB limit
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
+    # Validate PDF magic bytes
+    if not file_bytes.startswith(b'%PDF-'):
+        raise HTTPException(status_code=400, detail="Invalid PDF file format")
+
     logger.info(f"Processing resume for user {user['id']}: {file.filename}")
 
     # Step 1: Extract text
     try:
         raw_text = extract_text_from_pdf(file_bytes)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Text extraction failed: {e}")
+        raise HTTPException(status_code=400, detail="Could not extract text from PDF")
 
     if not raw_text or len(raw_text.strip()) < 50:
         raise HTTPException(
@@ -57,7 +62,8 @@ async def upload_and_parse_resume(
     try:
         parsed = await parse_resume_with_gemini(raw_text)
     except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Gemini parsing failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse resume content")
 
     logger.info(f"Gemini parsed: {len(parsed.get('skills', []))} skills found")
 

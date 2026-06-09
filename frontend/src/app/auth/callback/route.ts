@@ -17,7 +17,10 @@ import { createClient } from '@supabase/supabase-js'
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
+  // Validate 'next' against internal paths only (prevent open redirect)
+  const ALLOWED_PATHS = ['/dashboard', '/profile', '/resume', '/applications']
+  const rawNext = searchParams.get('next')
+  const next = rawNext && ALLOWED_PATHS.some(p => rawNext.startsWith(p)) ? rawNext : '/dashboard'
 
   if (code) {
     const supabase = createClient(

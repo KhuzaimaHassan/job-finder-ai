@@ -5,8 +5,13 @@ Week 3 — Gemini-powered AI endpoints (ATS, cover letter, skill gap, interview 
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 from app.services.auth import get_current_user
 from app.services import ai_gemini
@@ -80,11 +85,13 @@ def _gemini_http(exc: Exception) -> HTTPException:
             status_code=503,
             detail="AI features require GEMINI_API_KEY on the server.",
         )
-    return HTTPException(status_code=500, detail=f"AI request failed: {msg}")
+    return HTTPException(status_code=500, detail="AI request failed")
 
 
 @router.post("/ats-score", response_model=ATSScoreResponse)
+@limiter.limit("10/minute")
 async def ats_score(
+    request: Request,
     body: ATSScoreRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -97,12 +104,14 @@ async def ats_score(
     except ValueError as e:
         raise _gemini_http(e) from e
     except Exception as e:
-        logger.exception("ATS score failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"ATS score failed: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while calculating ATS score") from e
 
 
 @router.post("/cover-letter", response_model=CoverLetterResponse)
+@limiter.limit("10/minute")
 async def cover_letter(
+    request: Request,
     body: CoverLetterRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -117,12 +126,14 @@ async def cover_letter(
     except ValueError as e:
         raise _gemini_http(e) from e
     except Exception as e:
-        logger.exception("Cover letter failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Cover letter failed: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while generating cover letter") from e
 
 
 @router.post("/skill-gap", response_model=SkillGapResponse)
+@limiter.limit("10/minute")
 async def skill_gap(
+    request: Request,
     body: SkillGapRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -139,12 +150,14 @@ async def skill_gap(
     except ValueError as e:
         raise _gemini_http(e) from e
     except Exception as e:
-        logger.exception("Skill gap failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Skill gap failed: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while calculating skill gap") from e
 
 
 @router.post("/interview-prep", response_model=InterviewPrepResponse)
+@limiter.limit("10/minute")
 async def interview_prep(
+    request: Request,
     body: InterviewPrepRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -162,8 +175,8 @@ async def interview_prep(
     except ValueError as e:
         raise _gemini_http(e) from e
     except Exception as e:
-        logger.exception("Interview prep failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Interview prep failed: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while generating interview prep") from e
 
 class ResumeImproveRequest(BaseModel):
     resume_text: str = Field(..., min_length=10)
@@ -173,7 +186,9 @@ class ResumeImproveResponse(BaseModel):
     improvements: List[str]
 
 @router.post("/resume-improve", response_model=ResumeImproveResponse)
+@limiter.limit("10/minute")
 async def resume_improve(
+    request: Request,
     body: ResumeImproveRequest,
     _user: dict = Depends(get_current_user),
 ):
@@ -186,5 +201,5 @@ async def resume_improve(
     except ValueError as e:
         raise _gemini_http(e) from e
     except Exception as e:
-        logger.exception("Resume improve failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Resume improve failed: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while generating resume improvements") from e

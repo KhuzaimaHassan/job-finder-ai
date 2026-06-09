@@ -3,7 +3,7 @@
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { useState, useRef, useEffect } from "react";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { ResumeImprover } from "@/components/ai/resume-improver";
 
@@ -21,8 +21,7 @@ export default function ResumePage() {
   useEffect(() => {
     const fetchExisting = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await axios.get(`${API_URL}/api/resume`);
+        const res = await api.get(`/api/resume`);
         if (res.data && res.data.parsed) {
           setExistingResumeText(res.data.raw_text);
         }
@@ -65,8 +64,7 @@ export default function ResumePage() {
     formData.append("file", file);
 
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const { data } = await axios.post(`${API_URL}/api/resume/upload`, formData, {
+      const { data } = await api.post(`/api/resume/upload`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -77,7 +75,7 @@ export default function ResumePage() {
       
       // Auto-sync profile with resume data
       try {
-        await axios.post(`${API_URL}/api/profile/sync-from-resume`);
+        await api.post(`/api/profile/sync-from-resume`);
       } catch (syncErr) {
         console.error("Profile sync failed", syncErr);
       }

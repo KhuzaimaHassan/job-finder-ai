@@ -149,7 +149,7 @@ async def matched_jobs(
         logger.exception("Supabase error loading profile/resume for matched jobs")
         raise HTTPException(
             status_code=500,
-            detail=f"Could not load profile data: {e!s}",
+            detail="Could not load profile data",
         ) from e
 
     if not profile.get("skills") and not resume:
@@ -170,7 +170,7 @@ async def matched_jobs(
         )
     except Exception as e:
         logger.exception("Matching error")
-        raise HTTPException(status_code=500, detail=f"Matching failed: {e!s}") from e
+        raise HTTPException(status_code=500, detail="Matching failed due to internal error") from e
 
     # Paginate
     total = len(ranked)
@@ -186,7 +186,7 @@ async def matched_jobs(
         logger.exception("Failed to serialize matched jobs response")
         raise HTTPException(
             status_code=500,
-            detail=f"Could not build response: {e!s}",
+            detail="Could not build response format",
         ) from e
 
     return {

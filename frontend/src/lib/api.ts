@@ -35,7 +35,7 @@ export interface JobSearchParams {
   per_page?: number;
 }
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
 });

@@ -3,7 +3,7 @@
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { useState, useEffect } from "react";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { Loader2, Save, CheckCircle } from "lucide-react";
 
 export default function ProfilePage() {
@@ -25,8 +25,7 @@ export default function ProfilePage() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const { data } = await axios.get(`${API_URL}/api/profile`);
+        const { data } = await api.get(`/api/profile`);
         setProfile({
           name: data.name || "",
           location: data.location || "",
@@ -47,8 +46,7 @@ export default function ProfilePage() {
     setSaving(true);
     setSuccess(false);
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      await axios.patch(`${API_URL}/api/profile`, profile);
+      await api.patch(`/api/profile`, profile);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {

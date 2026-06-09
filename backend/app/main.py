@@ -5,11 +5,15 @@ Main application entry point. Sets up CORS, routes, and a background
 scheduler that refreshes jobs from all APIs every 6 hours.
 """
 
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.routers import jobs, auth, resume, profile, ai, applications
@@ -23,6 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 
 @asynccontextmanager
@@ -44,12 +49,20 @@ async def lifespan(app: FastAPI):
     logger.info("Scheduler shut down")
 
 
+_is_prod = os.getenv("RENDER", "") != "" or os.getenv("ENVIRONMENT", "").lower() == "production"
+
 app = FastAPI(
     title="Job Finder API",
     description="AI-powered job aggregator with resume matching",
     version="2.0.0",
     lifespan=lifespan,
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — allow the Next.js frontend
 app.add_middleware(
@@ -60,8 +73,8 @@ app.add_middleware(
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Register routers

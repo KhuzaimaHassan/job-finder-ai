@@ -20,7 +20,7 @@ services:
         sync: false
       - key: ADZUNA_APP_ID
         sync: false
-      - key: ADZUNA_API_KEY
+      - key: ADZUNA_APP_KEY
         sync: false
       - key: PYTHON_VERSION
         value: 3.12.3

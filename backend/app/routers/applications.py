@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.services.auth import get_current_user
@@ -11,11 +11,11 @@ class ApplicationCreate(BaseModel):
     job_id: str
     job_title: str
     company: str
-    status: str = "Saved"
+    status: Literal["Saved", "Applied", "Interview", "Offer", "Rejected"] = "Saved"
     notes: Optional[str] = ""
 
 class ApplicationUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[Literal["Saved", "Applied", "Interview", "Offer", "Rejected"]] = None
     notes: Optional[str] = None
 
 @router.get("")
