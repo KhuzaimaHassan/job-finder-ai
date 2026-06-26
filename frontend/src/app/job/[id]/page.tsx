@@ -172,7 +172,6 @@ export default function JobDetailPage() {
                   />
                 </div>
               </div>
-            </div>
 
             <AICopilotDrawer
               job={job}
