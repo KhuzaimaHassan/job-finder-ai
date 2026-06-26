@@ -52,14 +52,19 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
         />
       )}
 
-      {/* Drawer */}
+      {/* Popup Modal */}
       <div 
-        className={`fixed top-0 right-0 z-50 h-[100dvh] w-full sm:w-[480px] bg-[#0a0a0f] border-l border-zinc-800/80 shadow-2xl transform transition-transform duration-300 ease-in-out flex flex-col ${
-          isOpen ? "translate-x-0" : "translate-x-full"
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 pointer-events-none transition-opacity duration-300 ${
+          isOpen ? "opacity-100" : "opacity-0"
         }`}
       >
+        <div 
+          className={`w-full max-w-4xl h-[95dvh] sm:h-[85vh] bg-[#0a0a0f] border border-zinc-800/80 shadow-2xl rounded-2xl flex flex-col pointer-events-auto transform transition-transform duration-300 ${
+            isOpen ? "scale-100 translate-y-0" : "scale-95 translate-y-8"
+          }`}
+        >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800 bg-[#0a0a0f] shrink-0">
+        <div className="flex items-center justify-between p-6 border-b border-zinc-800 bg-[#0a0a0f] shrink-0 rounded-t-2xl">
           <h2 className="text-xl font-bold flex items-center gap-2 text-white">
             <span className="text-indigo-400"><Sparkles className="w-5 h-5" /></span> 
             AI Co-Pilot
@@ -81,6 +86,7 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
           <CoverLetter jobTitle={job.title} company={job.company} jobDescription={job.description} resumeText={resumeText} />
           <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} />
           <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} />
+        </div>
         </div>
       </div>
     </>
