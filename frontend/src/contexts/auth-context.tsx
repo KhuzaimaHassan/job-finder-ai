@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import axios from "axios";
+import { api } from "@/lib/api";
 
 interface AuthContextType {
   user: User | null;
@@ -26,11 +27,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       
-      // Set default auth header for axios if session exists
+      // Set default auth header for axios and api if session exists
       if (session?.access_token) {
         axios.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
+        api.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
       } else {
         delete axios.defaults.headers.common["Authorization"];
+        delete api.defaults.headers.common["Authorization"];
       }
       
       setLoading(false);
@@ -43,11 +46,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       
-      // Update axios default header
+      // Update axios and api default header
       if (session?.access_token) {
         axios.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
+        api.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
       } else {
         delete axios.defaults.headers.common["Authorization"];
+        delete api.defaults.headers.common["Authorization"];
       }
     });
 

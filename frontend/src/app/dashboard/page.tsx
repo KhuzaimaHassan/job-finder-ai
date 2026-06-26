@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { searchJobs, getMatchedJobs, type Job, type JobSearchParams, type JobSearchResponse } from "@/lib/api";
 import { JobCard } from "@/components/job-card";
 import { SearchBar } from "@/components/search-bar";
 import { FilterPills } from "@/components/filter-pills";
 import { JobCardSkeleton } from "@/components/job-card-skeleton";
-import { StatsBar } from "@/components/stats-bar";
+
 import { Navbar } from "@/components/navbar";
 import { AuthGuard } from "@/components/auth-guard";
 import { Sparkles, Globe } from "lucide-react";
@@ -25,47 +25,54 @@ export default function DashboardPage() {
     location?: string;
     source?: string;
   }>({});
-
-  const fetchJobs = useCallback(async (resetPage = false) => {
-    setLoading(true);
-    setError(null);
-    const currentPage = resetPage ? 1 : page;
-    if (resetPage) setPage(1);
-
-    const params: JobSearchParams = {
-      q: searchQuery || undefined,
-      location: filters.location || undefined,
-      job_type: filters.job_type || undefined,
-      source: filters.source || undefined,
-      page: currentPage,
-      per_page: 20,
-    };
-
-    try {
-      let data: JobSearchResponse;
-      if (matchMode === "matched") {
-        data = await getMatchedJobs(currentPage, 20);
-      } else {
-        data = await searchJobs(params);
-      }
-      setJobs(data.jobs);
-      setTotal(data.total);
-      setHasMore(data.has_more);
-    } catch (err: any) {
-      console.error("Failed to fetch jobs:", err);
-      if (err.response?.status === 400 && matchMode === "matched") {
-        setError("Please add skills to your profile or upload a resume to see matched jobs.");
-      } else {
-        setError("Failed to load jobs. Make sure the backend is running.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, filters, page, matchMode]);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
+    let active = true;
+
+    const fetchJobs = async () => {
+      setLoading(true);
+      setError(null);
+
+      const params: JobSearchParams = {
+        q: searchQuery || undefined,
+        location: filters.location || undefined,
+        job_type: filters.job_type || undefined,
+        source: filters.source || undefined,
+        page: page,
+        per_page: 20,
+      };
+
+      try {
+        let data: JobSearchResponse;
+        if (matchMode === "matched") {
+          data = await getMatchedJobs(page, 20);
+        } else {
+          data = await searchJobs(params);
+        }
+        if (!active) return;
+        setJobs(data.jobs);
+        setTotal(data.total);
+        setHasMore(data.has_more);
+      } catch (err: unknown) {
+        if (!active) return;
+        console.error("Failed to fetch jobs:", err);
+        if (err instanceof Error && (err as any).response?.status === 400 && matchMode === "matched") {
+          setError("Please add skills to your profile or upload a resume to see matched jobs.");
+        } else {
+          setError("Failed to load jobs. Make sure the backend is running.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
     fetchJobs();
-  }, [fetchJobs]);
+
+    return () => {
+      active = false;
+    };
+  }, [searchQuery, filters, page, matchMode, retryCount]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -162,7 +169,7 @@ export default function DashboardPage() {
               </div>
               <p className="text-gray-400 mb-4">{error}</p>
               <button
-                onClick={() => fetchJobs(true)}
+                onClick={() => setRetryCount((r) => r + 1)}
                 className="px-6 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-colors"
               >
                 Retry

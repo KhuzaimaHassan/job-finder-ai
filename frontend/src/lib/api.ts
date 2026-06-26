@@ -11,7 +11,7 @@ export interface Job {
   salary: string | null;
   description: string;
   url: string;
-  source: "adzuna" | "remoteok" | "remotive" | "indeed" | "google" | "jsearch";
+  source: "adzuna" | "remoteok" | "remotive" | "indeed" | "google" | "jsearch" | "jobicy" | "himalayas" | "linkedin" | "supabase" | string;
   posted_date: string | null;
   tags: string[];
   job_type: string | null;
@@ -40,22 +40,7 @@ export const api = axios.create({
   timeout: 15000,
 });
 
-/**
- * The shared axios instance does not inherit updates to `axios.defaults` made
- * after it was created. Attach the Supabase JWT on every request so protected
- * routes (e.g. /api/jobs/matched) receive Authorization.
- */
-api.interceptors.request.use(async (config) => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`;
-  } else {
-    delete config.headers.Authorization;
-  }
-  return config;
-});
+// The auth token is now set directly on api.defaults by auth-context.tsx
 
 export async function searchJobs(
   params: JobSearchParams
