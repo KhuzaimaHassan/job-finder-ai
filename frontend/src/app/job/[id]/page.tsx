@@ -9,6 +9,18 @@ import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
 import { AICopilotDrawer } from "@/components/ai-copilot-drawer";
 
+function cleanJobDescription(text: string) {
+  if (!text) return "";
+  return text
+    .replace(/â/g, "–")
+    .replace(/â/g, "—")
+    .replace(/â/g, "'")
+    .replace(/â/g, '"')
+    .replace(/â/g, '"')
+    .replace(/â¦/g, "…")
+    .replace(/â/g, "-"); // fallback for loose 'â' dashes
+}
+
 export default function JobDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -168,7 +180,8 @@ export default function JobDetailPage() {
                   <h3 className="text-lg font-semibold text-white mb-3">Job Description</h3>
                   <div 
                     className="job-description text-sm text-zinc-300 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(job.description) }}
+                    style={{ fontFamily: "'Times New Roman', Times, serif" }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cleanJobDescription(job.description)) }}
                   />
                 </div>
               </div>
