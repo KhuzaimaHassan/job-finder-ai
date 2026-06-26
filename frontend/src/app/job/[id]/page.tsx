@@ -179,7 +179,7 @@ export default function JobDetailPage() {
                 <div className="prose prose-invert max-w-none prose-p:text-zinc-300 prose-a:text-indigo-400">
                   <h3 className="text-lg font-semibold text-white mb-3">Job Description</h3>
                   <div 
-                    className="job-description text-sm text-zinc-300 leading-relaxed"
+                    className="job-description text-base text-zinc-300 leading-relaxed"
                     style={{ fontFamily: "'Times New Roman', Times, serif" }}
                     dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cleanJobDescription(job.description)) }}
                   />
