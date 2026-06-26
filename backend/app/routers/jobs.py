@@ -3,7 +3,7 @@ import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.models.schemas import Job, JobSearchResponse
+from app.schemas.jobs import Job, JobSearchResponse
 from app.services.job_fetcher import search_jobs, get_job_by_id, get_all_jobs
 from app.services.auth import get_current_user
 from app.services.supabase_client import get_supabase

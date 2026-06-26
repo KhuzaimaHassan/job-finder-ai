@@ -3,37 +3,12 @@ import { supabase } from "@/lib/supabase";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export interface Job {
-  id: string;
-  title: string;
-  company: string;
-  location: string;
-  salary: string | null;
-  description: string;
-  url: string;
-  source: "adzuna" | "remoteok" | "remotive" | "indeed" | "google" | "jsearch" | "jobicy" | "himalayas" | "linkedin" | "supabase" | string;
-  posted_date: string | null;
-  tags: string[];
-  job_type: string | null;
-  match_score?: number;
-}
-
-export interface JobSearchResponse {
-  jobs: Job[];
-  total: number;
-  page: number;
-  per_page: number;
-  has_more: boolean;
-}
-
-export interface JobSearchParams {
-  q?: string;
-  location?: string;
-  job_type?: string;
-  source?: string;
-  page?: number;
-  per_page?: number;
-}
+import { 
+  Job, JobSearchResponse, JobSearchParams, 
+  UserProfileRow, ResumeInfo, ATSScoreResult, 
+  SkillGapResult, InterviewQ, Application 
+} from "@/types";
+export * from "@/types";
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -75,42 +50,18 @@ export async function getJobStats(): Promise<{
 
 const AI_TIMEOUT_MS = 120_000;
 
-export interface UserProfileRow {
-  user_id?: string;
-  name?: string;
-  email?: string;
-  skills?: string[];
-  experience_years?: number;
-  target_roles?: string[];
-  location?: string;
-}
 
 export async function getProfile(): Promise<UserProfileRow> {
   const { data } = await api.get<UserProfileRow>("/api/profile");
   return data;
 }
 
-export interface ResumeInfo {
-  parsed: boolean;
-  raw_text?: string;
-  skills?: string[];
-  education?: unknown[];
-  experience?: unknown[];
-  projects?: unknown[];
-  parsed_at?: string;
-}
 
 export async function getResumeInfo(): Promise<ResumeInfo> {
   const { data } = await api.get<ResumeInfo>("/api/resume");
   return data;
 }
 
-export interface ATSScoreResult {
-  score: number;
-  matching_keywords: string[];
-  missing_keywords: string[];
-  verdict: string;
-}
 
 export async function postAiAtsScore(
   resume_text: string,
@@ -138,15 +89,6 @@ export async function postAiCoverLetter(body: {
   return data;
 }
 
-export interface SkillGapResult {
-  missing_skills: string[];
-  courses: {
-    name: string;
-    platform: string;
-    url: string;
-    free: boolean;
-  }[];
-}
 
 export async function postAiSkillGap(
   user_skills: string,
@@ -160,10 +102,6 @@ export async function postAiSkillGap(
   return data;
 }
 
-export interface InterviewQ {
-  question: string;
-  answer_structure: string;
-}
 
 export async function postAiInterviewPrep(body: {
   job_title: string;
@@ -194,17 +132,6 @@ export async function postAiResumeImprove(body: {
 // Applications
 // ==========================================
 
-export interface Application {
-  id: string;
-  user_id: string;
-  job_id: string;
-  job_title: string;
-  company: string;
-  status: 'Saved' | 'Applied' | 'Interview' | 'Offer' | 'Rejected';
-  notes: string;
-  applied_date: string;
-  updated_at: string;
-}
 
 export async function getApplications(): Promise<Application[]> {
   const { data } = await api.get<Application[]>("/api/applications");

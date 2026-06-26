@@ -27,7 +27,7 @@ import math
 import hashlib
 from typing import List, Optional
 from app.config import settings
-from app.models.schemas import Job
+from app.schemas.jobs import Job
 
 try:
     from supabase import create_client as _sb_create

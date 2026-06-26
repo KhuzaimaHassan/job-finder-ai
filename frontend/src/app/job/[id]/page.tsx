@@ -8,18 +8,7 @@ import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
 import { AICopilotDrawer } from "@/components/ai-copilot-drawer";
-
-function cleanJobDescription(text: string) {
-  if (!text) return "";
-  return text
-    .replace(/â/g, "–")
-    .replace(/â/g, "—")
-    .replace(/â/g, "'")
-    .replace(/â/g, '"')
-    .replace(/â/g, '"')
-    .replace(/â¦/g, "…")
-    .replace(/â/g, "-"); // fallback for loose 'â' dashes
-}
+import { cleanJobDescription } from "@/lib/utils";
 
 export default function JobDetailPage() {
   const params = useParams();
