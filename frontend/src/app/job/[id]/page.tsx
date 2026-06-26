@@ -7,11 +7,7 @@ import { getJob, getProfile, getResumeInfo, createApplication, type Job } from "
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
-// AI Components
-import { ATSScore } from "@/components/ai/ats-score";
-import { CoverLetter } from "@/components/ai/cover-letter";
-import { SkillsGapAnalysis } from "@/components/ai/skills-gap";
-import { InterviewPrep } from "@/components/ai/interview-prep";
+import { AICopilotDrawer } from "@/components/ai-copilot-drawer";
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -108,10 +104,7 @@ export default function JobDetailPage() {
             <ArrowLeft className="w-4 h-4" /> Back to jobs
           </button>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* Left Column: Job Details */}
-            <div className="lg:col-span-2 space-y-6">
+          <div className="max-w-4xl mx-auto space-y-6">
               
               {/* Job Header */}
               <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 md:p-8">
@@ -179,42 +172,14 @@ export default function JobDetailPage() {
                   />
                 </div>
               </div>
-
             </div>
 
-            {/* Right Column: AI Features */}
-            <div className="space-y-6">
-              <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-                <span className="text-indigo-400">✨</span> AI Co-Pilot
-              </h2>
-
-              {/* ATS Score */}
-              <ATSScore 
-                jobDescription={job.description} 
-                resumeText={resumeText} 
-              />
-
-              {/* Cover Letter Generator */}
-              <CoverLetter 
-                jobTitle={job.title}
-                company={job.company}
-                jobDescription={job.description}
-                resumeText={resumeText}
-              />
-
-              {/* Skills Gap Analysis */}
-              <SkillsGapAnalysis 
-                userSkills={userSkills}
-                jobRequiredSkills={requiredSkills}
-              />
-
-              {/* Interview Prep */}
-              <InterviewPrep 
-                jobTitle={job.title}
-                jobDescription={job.description}
-                userSkills={userSkills}
-              />
-            </div>
+            <AICopilotDrawer
+              job={job}
+              userSkills={userSkills}
+              resumeText={resumeText}
+              requiredSkills={requiredSkills}
+            />
           </div>
         </main>
       </div>
