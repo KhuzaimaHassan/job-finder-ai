@@ -5,10 +5,10 @@ Resume upload, parsing, and retrieval endpoints.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.services.auth import get_current_user
-from app.services.supabase_client import get_supabase
+from app.services.supabase_client import get_supabase, get_user_supabase
 from app.services.resume_parser import extract_text_from_pdf, parse_resume_with_gemini
 from app.services.embeddings import clear_user_embedding
 
@@ -32,9 +32,12 @@ async def upload_and_parse_resume(
     if file.content_type and file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
+    if getattr(file, 'size', 0) and file.size > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+        
     # Read file
     file_bytes = await file.read()
-    if len(file_bytes) > 10 * 1024 * 1024:  # 10MB limit
+    if len(file_bytes) > 10 * 1024 * 1024:  # Fallback 10MB limit
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
     # Validate PDF magic bytes
@@ -68,7 +71,7 @@ async def upload_and_parse_resume(
     logger.info(f"Gemini parsed: {len(parsed.get('skills', []))} skills found")
 
     # Step 3: Store in Supabase
-    supabase = get_supabase()
+    supabase = get_user_supabase(user["token"])
 
     # Upload PDF to Supabase Storage
     file_path = f"{user['id']}/{file.filename}"
@@ -96,10 +99,14 @@ async def upload_and_parse_resume(
         "experience": parsed.get("experience", []),
         "projects": parsed.get("projects", []),
         "file_path": file_path,
-        "parsed_at": datetime.utcnow().isoformat(),
+        "parsed_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    result = supabase.table("resumes").insert(resume_record).execute()
+    try:
+        supabase.table("resumes").insert(resume_record).execute()
+    except Exception as e:
+        logger.error(f"Failed to save resume to DB: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save parsed resume")
 
     # Clear cached embedding so it regenerates with new resume
     clear_user_embedding(user["id"])
@@ -117,7 +124,7 @@ async def upload_and_parse_resume(
 @router.get("")
 async def get_resume(user: dict = Depends(get_current_user)):
     """Get the latest parsed resume for the current user."""
-    supabase = get_supabase()
+    supabase = get_user_supabase(user["token"])
     result = (
         supabase.table("resumes")
         .select("*")

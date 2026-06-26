@@ -11,9 +11,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from app.limiter import limiter
 
 from app.config import settings
 from app.routers import jobs, auth, resume, profile, ai, applications
@@ -27,7 +27,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 
 @asynccontextmanager
@@ -35,7 +34,8 @@ async def lifespan(app: FastAPI):
     """Startup: fetch jobs immediately, then schedule refresh every 6 hours."""
     logger.info("Starting up — fetching jobs from all sources...")
     try:
-        await fetch_all_jobs()
+        import asyncio
+        asyncio.create_task(fetch_all_jobs())
     except Exception as e:
         logger.error(f"Initial job fetch failed: {e}")
 

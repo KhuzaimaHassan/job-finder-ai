@@ -36,6 +36,7 @@ async def get_current_user(
             "email": user.email,
             "name": user.user_metadata.get("full_name", user.email),
             "avatar_url": user.user_metadata.get("avatar_url", ""),
+            "token": token,
         }
     except HTTPException:
         raise

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.services.auth import get_current_user
 from supabase import Client
-from app.services.supabase_client import get_supabase
+from app.services.supabase_client import get_user_supabase
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -21,14 +21,14 @@ class ApplicationUpdate(BaseModel):
 @router.get("")
 def list_applications(user: dict = Depends(get_current_user)):
     user_id = user["id"]
-    supabase: Client = get_supabase()
+    supabase: Client = get_user_supabase(user["token"])
     res = supabase.table("applications").select("*").eq("user_id", user_id).order("updated_at", desc=True).execute()
     return res.data
 
 @router.post("")
 def create_application(body: ApplicationCreate, user: dict = Depends(get_current_user)):
     user_id = user["id"]
-    supabase: Client = get_supabase()
+    supabase: Client = get_user_supabase(user["token"])
     
     # Check if already exists
     existing = supabase.table("applications").select("*").eq("user_id", user_id).eq("job_id", body.job_id).execute()
@@ -51,7 +51,7 @@ def create_application(body: ApplicationCreate, user: dict = Depends(get_current
 @router.patch("/{app_id}")
 def update_application(app_id: str, body: ApplicationUpdate, user: dict = Depends(get_current_user)):
     user_id = user["id"]
-    supabase: Client = get_supabase()
+    supabase: Client = get_user_supabase(user["token"])
     
     # Ensure ownership
     existing = supabase.table("applications").select("*").eq("id", app_id).eq("user_id", user_id).execute()
@@ -74,7 +74,7 @@ def update_application(app_id: str, body: ApplicationUpdate, user: dict = Depend
 @router.delete("/{app_id}")
 def delete_application(app_id: str, user: dict = Depends(get_current_user)):
     user_id = user["id"]
-    supabase: Client = get_supabase()
+    supabase: Client = get_user_supabase(user["token"])
     
     existing = supabase.table("applications").select("*").eq("id", app_id).eq("user_id", user_id).execute()
     if not existing.data:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from app.services.auth import get_current_user
-from app.services.supabase_client import get_supabase
+from app.services.supabase_client import get_supabase, get_user_supabase
 from app.services.embeddings import clear_user_embedding
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
@@ -25,7 +25,7 @@ class ProfileUpdate(BaseModel):
 @router.get("")
 async def get_profile(user: dict = Depends(get_current_user)):
     """Get the current user's profile."""
-    supabase = get_supabase()
+    supabase = get_user_supabase(user["token"])
     result = supabase.table("profiles").select("*").eq("user_id", user["id"]).execute()
 
     if result.data:
@@ -51,7 +51,7 @@ async def update_profile(
     user: dict = Depends(get_current_user),
 ):
     """Update the current user's profile."""
-    supabase = get_supabase()
+    supabase = get_user_supabase(user["token"])
 
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
     if not update_data:
@@ -76,7 +76,7 @@ async def update_profile(
 @router.post("/sync-from-resume")
 async def sync_from_resume(user: dict = Depends(get_current_user)):
     """Populate profile skills and info from the latest parsed resume."""
-    supabase = get_supabase()
+    supabase = get_user_supabase(user["token"])
 
     # Get latest resume
     resume_result = (

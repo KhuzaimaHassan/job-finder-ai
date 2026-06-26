@@ -24,6 +24,7 @@ import asyncio
 import logging
 import re
 import math
+import hashlib
 from typing import List, Optional
 from app.config import settings
 from app.models.schemas import Job
@@ -443,10 +444,9 @@ async def fetch_jobspy_pakistan_jobs() -> List[Job]:
                 if url == "nan":
                     url = ""
 
-                # Posted date
                 posted = row.get("date_posted", None)
                 posted_str = ""
-                if posted and str(posted) != "nan" and str(posted) != "NaT":
+                if posted is not None and str(posted).lower() not in ("nan", "nat", "none"):
                     try:
                         posted_str = str(posted)[:10]
                     except Exception:
@@ -455,7 +455,8 @@ async def fetch_jobspy_pakistan_jobs() -> List[Job]:
                 site = str(row.get("site", "indeed")).lower()
                 source_name = "indeed" if "indeed" in site else "google"
 
-                job_id = f"{source_name}_{abs(hash(f'{title}{company}{loc}'))}"
+                id_hash = hashlib.md5(f'{title}{company}{loc}'.encode()).hexdigest()[:12]
+                job_id = f"{source_name}_{id_hash}"
                 combined = f"{title} {desc}"
 
                 jobs_list.append(
@@ -552,7 +553,7 @@ async def fetch_jsearch_jobs(
 
             jobs.append(
                 Job(
-                    id=f"jsearch_{item.get('job_id', abs(hash(f'{title}{company}')))}",
+                    id=f"jsearch_{item.get('job_id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}",
                     title=title,
                     company=company,
                     location=location,
@@ -627,7 +628,7 @@ async def fetch_himalayas_jobs(
             if isinstance(tags_raw, str):
                 tags_raw = [t.strip() for t in tags_raw.split(",")]
 
-            job_id = f"himalayas_{item.get('id', abs(hash(f'{title}{company}')))}"
+            job_id = f"himalayas_{item.get('id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}"
 
             jobs.append(
                 Job(
@@ -706,7 +707,7 @@ async def fetch_jobicy_jobs(
             tags.extend(_extract_tags(combined))
             tags = list(set(tags))[:10]
 
-            job_id = f"jobicy_{item.get('id', abs(hash(f'{title}{company}')))}"
+            job_id = f"jobicy_{item.get('id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}"
 
             jobs.append(
                 Job(
@@ -776,7 +777,7 @@ async def fetch_jobs_from_supabase() -> List[Job]:
                     description=row.get("description", ""),
                     url=row.get("url", ""),
                     source=row.get("source", "supabase"),
-                    posted_date=row.get("posted_date"),
+                    posted_date=row.get("posted_date") if row.get("posted_date") and str(row.get("posted_date")).lower() != "nan" else "",
                     tags=row.get("tags") or [],
                     job_type=row.get("job_type"),
                 ))
@@ -948,6 +949,10 @@ async def fetch_all_jobs() -> List[Job]:
     # Only persist API-sourced jobs (not the ones we already loaded from Supabase)
     api_only = [j for j in unique_jobs if j.id not in {s.id for s in supabase_jobs}]
     asyncio.create_task(persist_jobs_to_supabase(api_only))
+
+    # Clear embedding cache to plug memory leak
+    from app.services.embeddings import clear_job_embeddings
+    clear_job_embeddings()
 
     return unique_jobs
 

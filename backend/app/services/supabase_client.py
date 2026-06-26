@@ -5,7 +5,7 @@ Singleton Supabase client for backend operations.
 Uses the service_role key for admin-level access (bypass RLS).
 """
 
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from app.config import settings
 
 _supabase_client: Client | None = None
@@ -26,8 +26,12 @@ def get_supabase() -> Client:
     return _supabase_client
 
 
-def get_supabase_anon() -> Client:
-    """Get Supabase client with anon key (for user-context operations)."""
+def get_user_supabase(token: str) -> Client:
+    """Get Supabase client with user JWT token to enforce RLS."""
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    return create_client(
+        settings.SUPABASE_URL, 
+        settings.SUPABASE_KEY,
+        options=ClientOptions(headers={"Authorization": f"Bearer {token}"})
+    )
