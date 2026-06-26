@@ -170,6 +170,9 @@ export default function ProfilePage() {
             <div className="space-y-3">
               <label className="text-sm font-medium text-zinc-300">Target Roles</label>
               <div className="flex flex-wrap gap-2 mb-2">
+                {profile.target_roles.length === 0 && (
+                  <span className="text-zinc-500 text-sm italic">No target roles added yet.</span>
+                )}
                 {profile.target_roles.map((role) => (
                   <span key={role} className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-blue-500/10 text-blue-300 text-sm border border-blue-500/20">
                     {role}
@@ -190,6 +193,9 @@ export default function ProfilePage() {
             <div className="space-y-3">
               <label className="text-sm font-medium text-zinc-300">Skills</label>
               <div className="flex flex-wrap gap-2 mb-2">
+                {profile.skills.length === 0 && (
+                  <span className="text-zinc-500 text-sm italic">No skills added yet.</span>
+                )}
                 {profile.skills.map((skill) => (
                   <span key={skill} className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-purple-500/10 text-purple-300 text-sm border border-purple-500/20">
                     {skill}

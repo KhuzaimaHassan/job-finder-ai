@@ -108,7 +108,7 @@ export function Navbar() {
 
       {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-md px-4 py-3 space-y-1">
+        <div className="md:hidden border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-md px-4 py-3 space-y-1 overflow-y-auto max-h-[80vh]">
           {navItems.map((item) => (
             <Link
               key={item.name}

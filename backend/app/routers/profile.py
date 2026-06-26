@@ -67,8 +67,11 @@ async def update_profile(
     # Clear cached embedding so it regenerates with new profile
     clear_user_embedding(user["id"])
 
-    if result.data:
-        return result.data[0]
+    # PostgREST might return empty data if no values were actually changed.
+    # To be safe, we just fetch and return the updated profile.
+    final_result = supabase.table("profiles").select("*").eq("user_id", user["id"]).execute()
+    if final_result.data:
+        return final_result.data[0]
 
     raise HTTPException(status_code=404, detail="Profile not found")
 

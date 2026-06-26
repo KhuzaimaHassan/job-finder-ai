@@ -178,6 +178,11 @@ export default function ApplicationsPage() {
                             )}
                           </Draggable>
                         ))}
+                        {appsByStatus[col].length === 0 && (
+                          <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 text-sm italic py-8 border-2 border-dashed border-zinc-800/50 rounded-lg">
+                            No jobs {col.toLowerCase()}
+                          </div>
+                        )}
                         {provided.placeholder}
                       </div>
                     )}

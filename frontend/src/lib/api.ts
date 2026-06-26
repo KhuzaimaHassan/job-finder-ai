@@ -37,7 +37,7 @@ export interface JobSearchParams {
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 15000,
+  timeout: 45000, // 45 seconds to allow for Gemini PDF parsing
 });
 
 // The auth token is now set directly on api.defaults by auth-context.tsx
