@@ -79,13 +79,33 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
-          <p className="text-sm text-zinc-400 mb-2">
-            Your personal AI assistant is ready. Analyze your resume, generate a cover letter, and prep for interviews.
-          </p>
-          <ATSScore jobDescription={job.description} resumeText={resumeText} />
-          <CoverLetter jobTitle={job.title} company={job.company} jobDescription={job.description} resumeText={resumeText} />
-          <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} />
-          <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} />
+          {!resumeText ? (
+            <div className="flex flex-col items-center justify-center h-full text-center space-y-4 text-zinc-400">
+              <div className="p-4 bg-zinc-900 rounded-full border border-zinc-800">
+                <Sparkles className="w-8 h-8 text-indigo-400 opacity-50" />
+              </div>
+              <p className="text-lg font-medium text-white">AI Co-Pilot Needs Your Resume</p>
+              <p className="max-w-md mx-auto text-sm">
+                To generate a personalized Cover Letter, calculate an ATS Score, and analyze your skills gap, the AI needs to read your resume.
+              </p>
+              <a 
+                href="/resume" 
+                className="mt-4 inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors"
+              >
+                Upload Resume
+              </a>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-zinc-400 mb-2">
+                Your personal AI assistant is ready. Analyze your resume, generate a cover letter, and prep for interviews.
+              </p>
+              <ATSScore jobDescription={job.description} resumeText={resumeText} />
+              <CoverLetter jobTitle={job.title} company={job.company} jobDescription={job.description} resumeText={resumeText} />
+              <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} />
+              <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} />
+            </>
+          )}
         </div>
         </div>
       </div>

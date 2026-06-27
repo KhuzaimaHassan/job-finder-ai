@@ -168,12 +168,29 @@ export default function DashboardPage() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
               </div>
               <p className="text-gray-400 mb-4">{error}</p>
-              <button
-                onClick={() => setRetryCount((r) => r + 1)}
-                className="px-6 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-colors"
-              >
-                Retry
-              </button>
+              {error === "Please add skills to your profile or upload a resume to see matched jobs." ? (
+                <div className="flex justify-center gap-4">
+                  <a
+                    href="/resume"
+                    className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+                  >
+                    Upload Resume
+                  </a>
+                  <a
+                    href="/profile"
+                    className="px-6 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white text-sm font-medium transition-colors"
+                  >
+                    Edit Profile
+                  </a>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setRetryCount((r) => r + 1)}
+                  className="px-6 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-colors"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
 
