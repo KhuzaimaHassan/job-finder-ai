@@ -71,9 +71,15 @@ async def _jobicy():
     # Reconcile stored IDs independently of feed pagination/publication window.
     ids = {job.provider_id or job.id.removeprefix("jobicy_") for job in jf._job_store.values()
            if job.source == "jobicy" and searchable(job)}
-    ids.update(job.provider_id for job in feed if job.provider_id)
+    # Fresh feed rows are already active; check missing cached IDs instead.
+    ids.difference_update(job.provider_id for job in feed if job.provider_id)
     try:
-        checks = await jobicy_status(sorted(value for value in ids if value and value.isdecimal())[:1000]) if ids else {}
+        pending = sorted(value for value in ids if value and value.isdecimal())
+        offset = _status.get("sources", {}).get("jobicy", {}).get("recheck_cursor", 0)
+        offset = offset % len(pending) if pending else 0
+        batch = (pending[offset:] + pending[:offset])[:100]
+        checks = await asyncio.wait_for(jobicy_status(batch), timeout=45) if batch else {}
+        feed.recheck_cursor = (offset + len(batch)) % len(pending) if pending else 0
         feed.availability = checks
     except Exception as exc:
         feed.error = "Availability check: " + type(exc).__name__
@@ -146,6 +152,8 @@ async def refresh_jobs():
                     outcome = {**sources[name], "status": "partial" if error or getattr(feed, "capped", False) else "success",
                                "last_success_at": datetime.now(timezone.utc).isoformat(), "observed": len(fresh),
                                "coverage_capped": getattr(feed, "capped", False), "error": error}
+                    if hasattr(feed, "recheck_cursor"):
+                        outcome["recheck_cursor"] = feed.recheck_cursor
                 except Exception as exc:
                     # Do not expose exception text: provider URLs can contain keys.
                     logger.warning("Job provider %s failed: %s", name, type(exc).__name__)

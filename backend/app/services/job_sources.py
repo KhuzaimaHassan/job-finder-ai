@@ -228,6 +228,7 @@ async def fetch_adzuna_jobs(query="data science python remote", country="gb", pa
                         location=(item.get("location") or {}).get("display_name") or "", description=desc[:10000],
                         url=item.get("redirect_url") or "", source="adzuna", posted_date=date_string(item.get("created")),
                         job_type="remote" if "remote" in f"{title} {desc}".lower() else "onsite", availability="active",
+                        location_restrictions=[country],
                         employment_type=item.get("contract_time"), tags=tags(f"{title} {desc}"), salary=salary(item.get("salary_min"), item.get("salary_max")))
                 for item in items:
                     add_record(result, parse, item)

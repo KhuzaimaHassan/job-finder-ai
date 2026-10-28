@@ -15,7 +15,7 @@ import numpy as np
 from typing import Any, List
 
 from app.config import settings
-from app.services.job_policy import term_matches, location_eligible, minimum_experience, parse_date
+from app.services.job_policy import term_matches, location_eligible, minimum_experience, parse_date, seniority_floor
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,9 @@ def _keyword_match_score(terms: set[str], job: Any) -> float:
 def _profile_match(profile, resume, job):
     if not location_eligible(job, profile.get("location")):
         return None
+    years = max(0, profile.get("experience_years") or 0)
+    if years < seniority_floor(job):
+        return None
     terms = _collect_match_terms(profile, resume)
     blob = f"{job.title} {job.description} {' '.join(job.tags)}"
     hits = sorted(term for term in terms if term_matches(blob, term))
@@ -135,7 +138,6 @@ def _profile_match(profile, resume, job):
         parts.append((25, role_score))
         reasons.append("Target role aligns" if role_score >= 50 else "Limited target-role alignment")
     required = minimum_experience(job)
-    years = max(0, profile.get("experience_years") or 0)
     if required is not None:
         if required > years + 2:
             return None  # Explicit minimum is materially beyond entered experience.
