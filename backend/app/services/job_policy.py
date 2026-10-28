@@ -69,21 +69,28 @@ def query_score(job, query):
 
 
 def relevant_role(job):
+    if re.search(r"\b(?:talent pool|talent community|expression of interest|future opportunities)\b", job.title, re.I):
+        return False
     return bool(re.search(r"\b(?:engineer|developer|scientist|data|devops|mlops|programmer|architect|software|technical|analytics|machine learning)\b", job.title, re.I))
 
 
 COUNTRIES = {
     "pk": ["pakistan", "pk", "karachi", "lahore", "islamabad", "rawalpindi"],
-    "us": ["united states", "united states of america", "usa", "us"],
-    "gb": ["united kingdom", "uk", "great britain", "england"],
-    "ca": ["canada", "ca"], "in": ["india", "in"], "br": ["brazil", "br"],
+    "us": ["united states", "united states of america", "usa", "us", "new york", "boston", "massachusetts", "san francisco", "seattle", "north cambridge"],
+    "gb": ["united kingdom", "uk", "great britain", "england", "london", "edinburgh"],
+    "ca": ["canada", "ca", "vancouver", "toronto", "montreal", "ottawa"], "in": ["india", "in"], "br": ["brazil", "br"],
     "au": ["australia", "au"], "sg": ["singapore", "sg"],
     "de": ["germany", "de"], "fr": ["france", "fr"], "es": ["spain", "es"],
 }
 
 
 def country_of(value):
+    for short, code in (("US", "us"), ("UK", "gb"), ("GB", "gb"), ("CA", "ca"), ("PK", "pk"), ("IN", "in")):
+        if re.search(r"(?:^|[,/ _-])" + short + r"(?:$|[,/ _-])", value):
+            return code
     value = value.lower().strip()
+    if value in ("u.s.", "u.s.a.", "u.k."):
+        value = value.replace(".", "")
     for code, names in COUNTRIES.items():
         if any(value == name or (len(name) > 2 and re.search(r"\b" + re.escape(name) + r"\b", value)) for name in names):
             return code
@@ -105,6 +112,8 @@ def location_eligible(job, location):
             return False
         if country == "pk" and job.location.lower().strip() in ("europe", "eu", "north america", "latam", "americas"):
             return False
+        if not explicit and not re.search(r"\b(?:remote|worldwide|anywhere|global|asia|apac)\b", job.location, re.I):
+            return False  # A specific unresolved geography is not worldwide.
     elif job.job_type in ("onsite", "hybrid"):
         other = country_of(job.location)
         if other and other != country:
@@ -118,3 +127,11 @@ def minimum_experience(job):
     text = plain_text(job.description)
     matches = re.findall(r"\b(\d{1,2})(?:\s*(?:[-–]|to)\s*\d{1,2})?\s*\+?\s*years?['’]?(?:\s+of)?\s+(?:professional\s+|relevant\s+|industry\s+|work\s+)?experience", text, re.I)
     return max((int(value) for value in matches if int(value) <= 40), default=None)
+
+
+def seniority_floor(job):
+    if re.search(r"\b(?:principal|staff|head|director|vice president)\b", job.title, re.I):
+        return 7
+    if re.search(r"\b(?:senior|sr\.?|manager)\b|\blead\s+(?:data|ml|software|engineer|developer|scientist|architect)", job.title, re.I):
+        return 3
+    return 0

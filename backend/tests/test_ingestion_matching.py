@@ -54,6 +54,18 @@ class IngestionMatchingTests(IsolatedAsyncioTestCase):
         self.assertFalse(location_eligible(job(location="USA",job_type="remote"), "Pakistan"))
         self.assertTrue(location_eligible(job(location="Worldwide",job_type="remote"), "Pakistan"))
 
+    def test_city_only_and_unresolved_locations_are_not_assumed_worldwide(self):
+        for location in ("Vancouver", "North Cambridge, Middlesex County", "Unresolved Specific City", "Remote-US", "U.S."):
+            self.assertFalse(location_eligible(job(location=location,job_type="remote"),"Karachi"),location)
+
+    def test_senior_titles_do_not_bypass_experience_on_short_descriptions(self):
+        for title in ("Principal Data Scientist", "Staff ML Engineer", "Senior Python Engineer", "Lead MLOps Engineer"):
+            self.assertIsNone(embeddings._profile_match({"skills":["Python"],"experience_years":0},None,job(title=title)))
+        self.assertIsNotNone(embeddings._profile_match({"skills":["Python"],"experience_years":8},None,job(title="Principal Data Scientist")))
+
+    def test_talent_pools_are_not_presented_as_vacancies(self):
+        self.assertFalse(jf._is_relevant_job(job(title="Backend Developer - Talent Pool")))
+
     async def test_match_profile_updates_reorder_experience_and_exclude_foreign_jobs(self):
         roles=[job("junior",title="Junior Python Engineer",description="Python. 1 year of experience"),
                job("senior",title="Senior Python Engineer",description="Python. 8 years of experience"),

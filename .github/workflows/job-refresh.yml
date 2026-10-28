@@ -21,7 +21,8 @@ jobs:
           import json, time, urllib.request
           url = 'https://job-finder-ai-backend.onrender.com/api/ready'
           last = None
-          for attempt in range(12):
+          deadline = time.monotonic() + 540
+          while time.monotonic() < deadline:
               try:
                   with urllib.request.urlopen(url, timeout=30) as response:
                       last = json.load(response)
