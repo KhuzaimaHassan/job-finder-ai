@@ -1,239 +1,235 @@
-<div align="center">
+# Job Finder AI
 
-# 🤖 Job Finder AI 
-### Your Intelligent Career Companion
+A job-search application for remote technology opportunities and Pakistan listings, with PDF resume parsing, job matching, AI application assistance, and a personal application tracker.
 
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Supabase](https://img.shields.io/badge/Supabase-Database_%26_Auth-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
-[![Google Gemini](https://img.shields.io/badge/Google_Gemini-AI_Powered-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[Live application](https://job-finder-ai-kappa.vercel.app/) · [Backend health](https://job-finder-ai-backend.onrender.com/api/health) · [Issues](https://github.com/KhuzaimaHassan/job-finder-ai/issues)
 
-**An enterprise-grade, full-stack AI platform that aggregates job listings, parses your resume via LLMs, and acts as a personalized career coach.**
+## What works
 
-[Live Demo](https://job-finder-ai-kappa.vercel.app) • [Backend API](https://job-finder-ai-backend.onrender.com) • [Report a Bug](https://github.com/KhuzaimaHassan/job-finder-ai/issues)
+- Google sign-in through Supabase Auth; protected dashboard, profile, resume, and tracker pages.
+- Search by keyword, location, source, work arrangement, and employment type. Remote and Full-time can be combined.
+- Resume upload: text-based PDF, maximum 10 MiB, with structured Gemini parsing. Scanned PDFs require OCR outside this application.
+- Matching: up to 100 keyword-shortlisted candidates ranked with embeddings, with a labelled keyword fallback if the AI provider fails or times out. Scores are relevance estimates.
+- AI tools: resume/job compatibility estimate, cover letter, skill-gap analysis with reviewed learning resources, interview preparation, and resume suggestions.
+- Tracker stages: Saved → Applied → Interview → Offer → Rejected. Desktop dragging, mobile status controls, and persistent notes are supported.
+- Resume synchronization adds skills while preserving manually entered experience years and target roles. Replacement uploads retain previous saved versions.
 
-</div>
+## Are the jobs live and recent?
 
----
+**The application polls live provider APIs; it is not a real-time feed or an employer-availability guarantee.** Fetching starts when the backend starts and is scheduled every six hours while that process stays running. User searches read an in-memory snapshot instead of calling providers on each request.
 
-## 📖 Overview
+The backend reloads database jobs seen within `JOB_CACHE_MAX_AGE_DAYS` (default **14 days**), merges newly fetched results, and replaces the searchable snapshot. `fetched_at` means **last observed by an importer**; `posted_date` comes from the source and can be much older. Repeatedly returned jobs renew their last-seen timestamp, so the 14-day rule does not mean “posted in the last 14 days.”
 
-Job Finder AI transforms the exhausting process of job hunting into a streamlined, automated, and highly personalized experience. Built on a robust **Next.js** frontend and a highly scalable **FastAPI** backend, the platform aggregates real-time job listings across multiple global boards.
+Old rows are normally **excluded from search, not deleted from Supabase**. Historical job links can return an archived page with Apply disabled. There are no persisted batch records or automatic batch rotation. The optional standalone scraper currently has a separate hard-delete cleanup and should not be used unchanged when historical links must be preserved.
 
-Instead of manually reading descriptions, users upload their PDF resumes to our **Google Gemini** ingestion pipeline. The AI then acts as an interactive "Co-Pilot," scoring applications, generating bespoke cover letters, identifying skill gaps, and generating highly targeted interview preparation questions for every single job.
+See [job fetching, freshness, limitations, and improvement priorities](docs/JOB_FETCHING.md), including the [dated production audit](docs/job-freshness-audit-2026-10-28.json). Those counts are a snapshot, not a live dashboard.
 
----
+### Current source coverage
 
-## ✨ Core Features & Capabilities
+| Source | Scheduled cloud behavior | Coverage and requirements |
+| --- | --- | --- |
+| RemoteOK | One API request per refresh | Public feed, filtered by broad technology keywords |
+| Remotive | 15 category/search requests per refresh | Public API; overlapping requests; needs consolidation and rate control |
+| Himalayas | Five searches, first page, at most 20 per search | Public API; no full traversal or explicit newest-first sort |
+| Jobicy | Four requests, at most 50 per request | Existing `/api/v2/remote-jobs` adapter; no cursor traversal or stored-job status checks |
+| Adzuna | Three first-page queries, GB/US/India, up to 50 each | Requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`; no Pakistan API query |
+| Indeed / Google via JobSpy helper | Only attempted if optional `python-jobspy` is installed | Package is absent from production requirements; no scheduled Pakistan coverage in the standard deployment |
+| Indeed / LinkedIn standalone scraper | Separate manual process | `backend/scripts/scrape_and_upload.py`; no recurring runner is provisioned |
+| JSearch | Disabled in the aggregator | Setting a key alone does not re-enable it; provider budget must be reviewed first |
 
-### 🧠 The AI Co-Pilot
-- **Intelligent ATS Scoring:** Evaluates your parsed resume against the specific job description to generate a compatibility score.
-- **Dynamic Cover Letters:** Context-aware cover letter generation tailored to the hiring company and required skills.
-- **Skill Gap Analysis:** Highlights exact technical deficiencies between your profile and the job posting, suggesting targeted learning paths.
-- **Interview Simulator:** Generates role-specific behavioral and technical interview questions to prep you before you hit apply.
+“Remote” may still mean restricted to a country or timezone. The current application does not establish that every remote result accepts applicants in Pakistan. Keyword filtering can also include adjacent or unrelated roles.
 
-### 🔍 Real-Time Job Aggregation Engine
-- **Multi-Source Fetching:** Seamlessly aggregates from Adzuna, Remotive, RemoteOK, and JSearch via asynchronous Python workers.
-- **Automated Job Caching:** APScheduler runs background tasks to continually update the PostgreSQL database every 6 hours, ensuring zero latency on the frontend.
-- **Smart Filtering:** Advanced filtering by location, tech stack, and remote flexibility.
+## Architecture and repository
 
-### 📊 Application Tracking System (ATS)
-- **Interactive Kanban Board:** Drag-and-drop interface powered by `@hello-pangea/dnd`.
-- **Pipeline Tracking:** Visualize your funnel (Saved → Applied → Interviewing → Offer → Rejected).
-- **Persistent State:** Live synchronization with Supabase to track notes and status updates securely.
-
-### 🔒 Enterprise-Grade Security
-- **Supabase Auth:** Google OAuth integration with strict session management.
-- **Row-Level Security (RLS):** All Postgres tables are guarded by RLS policies; users can mathematically only ever query or mutate their own data.
-
----
-
-## 🛠️ Technology Stack
-
-We selected our stack to optimize for **type-safety, raw performance, and AI interoperability**.
-
-| Layer | Technologies | Purpose |
-| :--- | :--- | :--- |
-| **Frontend** | React, Next.js 16 (App Router), TypeScript | Server-Side Rendering, SEO, Type-safe components |
-| **Styling & UI** | Tailwind CSS v4, shadcn/ui, Lucide | Dark-mode glassmorphism, responsive native layouts |
-| **Backend** | Python 3.12, FastAPI, Pydantic, Uvicorn | High-concurrency async API, strict schema validation |
-| **Artificial Intelligence** | Google Gemini 2.5 Flash | Fast, token-efficient LLM inference and PDF parsing |
-| **Database & Auth** | Supabase (PostgreSQL) | Managed relational data, RLS, Google OAuth |
-| **Infrastructure** | Vercel (Frontend), Render (Backend) | Edge networking, CI/CD, Containerized deployments |
-
----
-
-## 🏗️ System Architecture
-
-Our repository strictly follows Senior Developer conventions, enforcing separation of concerns across both environments.
-
-### Data Flow & Micro-Architecture
 ```mermaid
-graph TD
-    %% Frontend
-    subgraph "Next.js Frontend (Vercel)"
-        UI[React UI Components]
-        API_CLIENT[Axios Client & Types]
-        AUTH[AuthGuard Context]
-        UI <--> API_CLIENT
-        UI <--> AUTH
-    end
-
-    %% Backend
-    subgraph "FastAPI Backend (Render)"
-        ROUTERS[API Routers]
-        SCHEMAS[Pydantic Schemas]
-        SERVICES[Business Logic & AI]
-        ROUTERS --> SCHEMAS
-        ROUTERS --> SERVICES
-    end
-
-    %% External Services
-    DB[(Supabase PostgreSQL)]
-    LLM((Google Gemini AI))
-    JOBS[External Job APIs]
-
-    %% Connections
-    API_CLIENT <-->|REST over HTTPS| ROUTERS
-    SERVICES <-->|SQL Queries| DB
-    SERVICES <-->|LLM Prompts| LLM
-    SERVICES <-->|Async Aggregation| JOBS
-    AUTH <-->|OAuth JWT| DB
+flowchart LR
+    Browser[Next.js frontend / Vercel] --> API[FastAPI / Render]
+    Browser --> Auth[Supabase Auth / Google OAuth]
+    Providers[External job APIs] --> Fetch[Startup + in-process six-hour refresh]
+    Fetch --> Cache[In-memory searchable snapshot]
+    Fetch --> Jobs[(Supabase shared jobs table)]
+    Jobs --> Fetch
+    API --> Cache
+    API --> UserData[(RLS-protected profile / resume / tracker)]
+    API --> Gemini[Gemini parsing and matching]
+    Local[Optional standalone scraper] --> Jobs
 ```
 
-### Clean Codebase Structure
+| Area | Implementation |
+| --- | --- |
+| Frontend | Next.js 16.2, React 19.2, TypeScript, Tailwind CSS 4 |
+| Backend | Python 3.12 on Render, FastAPI, Pydantic, APScheduler |
+| Persistence | Supabase Postgres, Auth, private PDF storage |
+| AI | Configurable Gemini chat model and embedding model |
+| Deployment | GitHub `main` → Vercel frontend and Render backend |
+
 ```text
-job-finder-ai/
-├── backend/                       # Python FastAPI Monolithic API
-│   ├── app/
-│   │   ├── main.py                # Entrypoint & CORS Middleware
-│   │   ├── routers/               # Route Controllers (Jobs, AI, Auth)
-│   │   ├── schemas/               # Pydantic Validation Models
-│   │   └── services/              # Business Logic & 3rd Party Integrations
-│   └── requirements.txt
-├── frontend/                      # TypeScript Next.js App
-│   ├── src/
-│   │   ├── app/                   # App Router Pages & Layouts
-│   │   ├── components/            # Reusable UI & Complex Modals
-│   │   ├── lib/                   # API Clients & Utility Functions
-│   │   └── types/                 # Centralized TypeScript Interfaces
-│   ├── tailwind.config.ts
-│   └── package.json
-├── render.yaml                    # Infrastructure as Code (Backend)
-└── supabase_setup.sql             # DB Schema Migrations & RLS Policies
+backend/app/main.py                  API startup, CORS, scheduler, health
+backend/app/routers/                  Jobs, auth, profile, resume, AI, tracker
+backend/app/services/job_fetcher.py   Provider adapters, persistence, snapshot
+backend/app/services/embeddings.py    Bounded semantic ranking and fallback
+backend/scripts/audit_freshness.py    Read-only live freshness audit
+backend/scripts/scrape_and_upload.py  Optional manual scraper; see cleanup caveat
+backend/tests/                       Regression tests and disposable browser fixture
+frontend/src/app/                    Dashboard, job, profile, resume, tracker, login
+frontend/src/components/             Navigation, job cards, filters, AI dialogs
+frontend/src/contexts/               Auth initialization and user isolation
+supabase_setup.sql                   Tables, RLS, private PDF bucket/policies
+render.yaml                          Backend deployment configuration
+docs/JOB_FETCHING.md                  Ingestion behavior and operational guidance
+VERIFICATION.md                      Release validation and test limits
 ```
 
----
+## Local setup
 
-## 🚀 Local Development Setup
+Use **Python 3.12** to match the deployed backend and **Node.js 20.9+** (Node 22 recommended). Optional providers and AI calls may require accounts or incur provider usage; no provider pricing allowance is guaranteed here.
 
-We've made bootstrapping the environment as frictionless as possible.
+### 1. Supabase and Google sign-in
 
-### Prerequisites
-- Node.js (v20.9+, Node 22 recommended)
-- Python (v3.11+)
-- API Keys: [Supabase](https://supabase.com/), [Google AI Studio](https://aistudio.google.com/), [Adzuna](https://developer.adzuna.com/)
+1. Create or select a Supabase project. Review and run [`supabase_setup.sql`](supabase_setup.sql) in its SQL editor. It creates `jobs`, `profiles`, `resumes`, `applications`, RLS policies, the signup profile trigger, and a private `resumes` PDF bucket with user-folder policies. Review policy changes before rerunning it on an existing project.
+2. Enable Google in Supabase Authentication and configure the Google OAuth client for your Supabase callback URL.
+3. Set the Supabase Site URL to your frontend URL and allow `http://localhost:3000/dashboard` for local OAuth redirects. Allow `https://job-finder-ai-kappa.vercel.app/dashboard` for this production frontend, or the equivalent URL for your own deployment.
+4. Keep the Supabase service-role key on the backend only. The browser uses the public anon key and the signed-in user's token. Jobs are publicly readable; user tables and resume objects use user policies.
 
-### 1. Database Initialization
-Execute the contents of `supabase_setup.sql` in your Supabase SQL Editor. This will provision the tables (`profiles`, `resumes`, `applications`) and lock them down with Row-Level Security.
+### 2. Backend
 
-### 2. Backend Environment
-Navigate into the backend, initialize a virtual environment, and boot the ASGI server.
+From the repository root:
+
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Or `venv\Scripts\activate` on Windows
+# macOS / Linux
+source venv/bin/activate
+# Windows PowerShell instead: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# Populate your .env file
 cp .env.example .env
-
-# Run the API in development mode
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# PowerShell instead of cp: Copy-Item .env.example .env
 ```
-*API Documentation available at: `http://localhost:8000/docs`*
 
-### 3. Frontend Environment
-Navigate into the frontend, install the NPM packages, and spin up the Next.js dev server.
+Set actual values in `backend/.env`, then run:
+
+```bash
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Local API docs: [localhost:8000/docs](http://localhost:8000/docs). OpenAPI/Swagger are disabled when `RENDER` is set or `ENVIRONMENT=production`.
+
+### 3. Frontend
+
+In another terminal, from the repository root:
+
 ```bash
 cd frontend
-npm install
-
-# Populate your .env.local file
+npm ci
 cp .env.local.example .env.local
-
-# Run the Web App
+# PowerShell instead of cp: Copy-Item .env.local.example .env.local
 npm run dev
 ```
-*Web App available at: `http://localhost:3000`*
 
-### Reliability and local verification
+Set the frontend environment values before starting. Open [localhost:3000](http://localhost:3000).
 
-PDF extraction uses the pinned `pdfplumber` dependency in the backend requirements.
-Resumes must contain selectable text; image-only/scanned PDFs need OCR before upload.
-Uploading a replacement preserves earlier successfully saved resume versions and uses
-a separate storage object, so a failed save cannot delete the previous resume.
+### Configuration
 
-Job search only includes database rows observed within `JOB_CACHE_MAX_AGE_DAYS`
-(default 14). Fresh provider results update existing IDs and their observation times.
-Older rows are retained for historical tracker links and displayed as archived, with
-the Apply link disabled. A provider failure does not renew the age of its cached rows.
-The cloud scheduler does not refresh Indeed/LinkedIn through JobSpy: the optional
-local scraper must be run separately on a suitable machine. JSearch remains disabled
-until its quota and operating budget are deliberately reviewed.
+| Variable | Where | Meaning / default |
+| --- | --- | --- |
+| `SUPABASE_URL` | Backend | Supabase project URL |
+| `SUPABASE_KEY` | Backend | Public anon key used with each user's JWT |
+| `SUPABASE_SERVICE_KEY` | Backend only | Administrative reads and job-cache writes; never expose as `NEXT_PUBLIC_*` |
+| `GEMINI_API_KEY` | Backend only | Enables resume parsing and AI tools; matching falls back to keywords without it |
+| `GEMINI_AI_MODEL` | Backend | `gemini-2.5-flash` default |
+| `GEMINI_EMBEDDING_MODEL` | Backend | `gemini-embedding-001` default |
+| `MATCH_CANDIDATE_LIMIT` | Backend | Semantic shortlist, default 100, maximum 100 |
+| `MATCH_TIMEOUT_SECONDS` | Backend | Semantic ranking deadline, default 20, maximum 40 |
+| `JOB_CACHE_MAX_AGE_DAYS` | Backend | Last-seen database loading window, default 14; not a publication-age filter |
+| `FRONTEND_URL` | Backend | Allowed frontend origin for CORS |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Backend | Optional Adzuna credentials |
+| `JSEARCH_API_KEY` | Backend | Unused by the scheduled aggregator while its calls remain disabled |
+| `NEXT_PUBLIC_API_URL` | Frontend | `http://localhost:8000` locally; Render API origin in production |
+| `NEXT_PUBLIC_SUPABASE_URL` | Frontend | Same Supabase project as the backend |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend | Public anon key; never the service-role key |
 
-Matching uses `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`). It ranks at
-most `MATCH_CANDIDATE_LIMIT` keyword-shortlisted candidates semantically per request,
-using async batched requests, content-aware caches, and a bounded timeout. If the
-provider fails, the response consistently uses keyword scores and labels them in the UI.
+Refresh frequency is currently hard-coded to six hours in `backend/app/main.py`; it is not an environment setting. `NEXT_PUBLIC_*` values are embedded at build time, so changing them requires a frontend rebuild.
 
-Run the backend regression suite without cloud writes:
+## API reference
+
+The frontend attaches the current Supabase bearer token to authenticated requests.
+
+| Route | Access | Purpose |
+| --- | --- | --- |
+| `GET /api/health` | Public | Process health, cached count, deployment revision; does not prove a recent successful refresh |
+| `GET /api/jobs` | Public | Search; `q`, `location`, `job_type`, `employment_type`, `source`, `page`, `per_page` (1–100) |
+| `GET /api/jobs/search` | Public | Alias that uses `type` for work arrangement instead of `job_type` |
+| `GET /api/jobs/stats` | Public | Current snapshot counts by source |
+| `GET /api/jobs/{id}` | Public | Active detail or retained archived record |
+| `GET /api/jobs/matched` | Bearer token | Personalized ranking; optional `page`, `per_page` (1–50) |
+| `GET /api/auth/me` | Bearer token | Current authenticated user |
+| `GET/PATCH /api/profile` | Bearer token | Read or update profile |
+| `POST /api/profile/sync-from-resume` | Bearer token | Merge latest resume skills into profile |
+| `GET /api/resume`, `POST /api/resume/upload` | Bearer token | Read latest parsed resume / multipart PDF upload |
+| `GET/POST /api/applications` | Bearer token | Read / save applications |
+| `PATCH/DELETE /api/applications/{id}` | Bearer token | Edit status/notes or remove an application |
+| `POST /api/ai/{tool}` | Bearer token | `ats-score`, `cover-letter`, `skill-gap`, `interview-prep`, `resume-improve` |
+
+Example: `GET /api/jobs?q=python&job_type=remote&employment_type=fulltime&page=1&per_page=20`. All Jobs queries match descriptions as well as titles. There is no public “fetch now” endpoint, publication-date filter, or ingestion-run dashboard.
+
+## Verification
+
+Backend regression suite (from `backend/`):
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Frontend (from `frontend/`, with your intended environment configured):
+
+```bash
+npm run lint
+npm run build
+```
+
+See [VERIFICATION.md](VERIFICATION.md) for tested flows and limits. The live freshness audit is read-only:
 
 ```bash
 cd backend
-python -m unittest tests.test_reliability -v
+python scripts/audit_freshness.py
+# Optional: also read the PUBLIC jobs table configured in backend/.env
+python scripts/audit_freshness.py --database --output ../freshness-report.json
 ```
 
-For browser regression checks, `tests.browser_app` is a **local-only fixture**, with
-disposable in-memory storage and simulated authentication/AI. Never deploy it.
-It exercises the real application routers, PDF extraction, and frontend flows:
+When using `--database`, confirm that the configured Supabase project belongs to the API being audited. The report contains aggregate public job data, scans up to 50,000 DB rows, and marks that limit if reached. It does not invoke the scheduler, scrape providers, change rows, or prove recurring execution from one sample. API pagination is not transactionally consistent if a refresh occurs mid-audit.
+
+### Disposable local browser fixture
+
+The fixture exercises the real API routers and PDF extraction with in-memory database/storage, simulated auth, and deterministic AI. It never writes to production. **Never deploy it.**
+
+Terminal 1, from `backend/`:
 
 ```bash
-# Terminal 1, from backend/ (bind loopback only)
 python -m uvicorn tests.browser_app:app --host 127.0.0.1 --port 8000
-
-# Terminal 2, from frontend/: set these process environment variables first
-# NEXT_PUBLIC_API_URL=http://localhost:8000
-# NEXT_PUBLIC_SUPABASE_URL=http://localhost:8000
-# NEXT_PUBLIC_SUPABASE_ANON_KEY=local-disposable-anon
-npm run build
-npm start
 ```
 
-Open `http://localhost:3000`; Continue with Google uses the local fixture instead of
-a real Google account. `http://localhost:8000/_test/resume.pdf` supplies a synthetic
-resume for upload checks. Restart the fixture to discard its data. For a real deployment,
-rebuild using the real frontend environment values: Next.js embeds these public values
-at build time. Production must continue using `app.main:app` as its backend entrypoint.
+Terminal 2, from `frontend/`, set these process variables before building:
 
----
+```text
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_ANON_KEY=local-disposable-anon
+```
 
-## 🚢 Deployment Strategy
+Then run `npm run build` and `npm start`. On [localhost:3000](http://localhost:3000), Continue with Google uses the disposable provider. A synthetic PDF is available at `http://localhost:8000/_test/resume.pdf`. Restarting the fixture discards its data. Rebuild with real environment values before using the frontend with real services.
 
-The hosted frontend and backend deploy through their existing GitHub integrations when changes are merged to `main`. Run the local checks above before merging. The frontend `X-App-Revision` response header and backend `/api/health` revision expose the deployed Git SHA for release verification.
+## Deployment and operations
 
-- **Frontend (Vercel):** Connect your fork to Vercel. Ensure `Root Directory` is set to `frontend`. Populate the environment variables. Pushes to `main` auto-deploy to edge networks.
-- **Backend (Render):** Connect your fork to Render via a Blueprint deployment. Render natively reads `render.yaml` to provision a Python web service, install dependencies, and expose the dynamic `$PORT`.
+This repository's existing integrations deploy changes merged to `main`:
 
----
+- **Vercel:** root directory `frontend`; configure the three `NEXT_PUBLIC_*` variables.
+- **Render:** root directory `backend`; `pip install -r requirements.txt`; production entrypoint `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Configure backend secrets and `FRONTEND_URL`. See [render.yaml](render.yaml).
+- **Release check:** compare the frontend `X-App-Revision` header and backend `/api/health` JSON `revision` with the GitHub main commit. Neither marker confirms ingestion health.
+- **Scheduler:** runs inside the API process; use one worker/instance with this design. Multiple workers start independent schedulers and caches. A web-service restart starts a new fetch and resets the interval. If your Render instance can sleep, unattended six-hour execution is not assured. See [operational guidance and provider references](docs/JOB_FETCHING.md#operations-and-troubleshooting).
+- **Manual scraper:** no recurring runner is provisioned. Read the [cleanup caveat](docs/JOB_FETCHING.md#optional-local-scraper) before using it; its existing cleanup can delete archived job records.
 
-## 📝 License
+## Known limitations and next work
 
-Distributed under the MIT License. See `LICENSE` for more information.
+The fetching approach is suitable as an MVP foundation, but does not yet provide strict freshness, complete discovery, or a durable ingestion service. Priorities are a durable scheduler/run log, provider-specific rate budgets, explicit expiry/closure validation, cursor/page coverage, and one archive/retention policy shared by every importer. The current Gemini chat SDK is also deprecated and needs migration. Detailed acceptance criteria are in [JOB_FETCHING.md](docs/JOB_FETCHING.md#prioritized-improvements).
 
----
-<div align="center">
-  <b>Architected and Engineered by <a href="https://github.com/KhuzaimaHassan">Khuzaima Hassan</a></b><br>
-  <i>Built with uncompromising standards for modern AI application development.</i>
-</div>
+No license file is currently included in the repository; this README does not grant or invent a license.

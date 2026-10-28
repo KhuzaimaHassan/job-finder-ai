@@ -1,36 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Job Finder AI frontend
 
-## Getting Started
+Next.js 16.2 / React 19.2 client for the Job Finder API. Use Node.js 20.9+; Node 22 is recommended.
 
-First, run the development server:
+## Run locally
+
+From `frontend/`:
 
 ```bash
+npm ci
+cp .env.local.example .env.local
+# PowerShell: Copy-Item .env.local.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Configure `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. The browser key must be the public anon key. Start the backend separately and allow the local `/dashboard` OAuth redirect in Supabase. These public values are embedded during the build, so rebuild after changing deployment values.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Pages: `/dashboard`, `/job/[id]`, `/applications`, `/resume`, `/profile`, `/login`. The root redirects to `/dashboard`; protected pages wait for authentication initialization. OAuth returns to `/dashboard`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+npm start
+```
 
-## Learn More
+Vercel uses this directory as the project root. The production `X-App-Revision` header identifies the deployed Git commit.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The dashboard reads the backend snapshot when it requests jobs; it does not stream newly imported jobs. Its source date is not a guarantee that the employer is still accepting applications. See the [main README](../README.md), [job freshness guide](../docs/JOB_FETCHING.md), and [verification record](../VERIFICATION.md) for setup, limits and the disposable local browser fixture.

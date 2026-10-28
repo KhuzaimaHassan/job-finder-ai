@@ -1,0 +1,95 @@
+{
+  "checked_at_utc": "2026-10-28T13:59:57.784913+00:00",
+  "api_url": "https://job-finder-ai-backend.onrender.com",
+  "health": {
+    "status": "healthy",
+    "jobs_cached": 324,
+    "revision": "ba61f2b75e9572518bfcdf6c5e3038f093146451"
+  },
+  "search": {
+    "count": 324,
+    "parseable_dates": 324,
+    "within_1_day": 42,
+    "within_7_days": 184,
+    "older_than_14_days": 107,
+    "older_than_30_days": 61,
+    "future_dates": 0,
+    "oldest_date": "2025-08-14T16:50:21+00:00",
+    "newest_date": "2026-10-28T00:00:00+00:00",
+    "reported_total": 324
+  },
+  "sources": {
+    "adzuna": {
+      "count": 16,
+      "parseable_dates": 16,
+      "within_1_day": 2,
+      "within_7_days": 6,
+      "older_than_14_days": 9,
+      "older_than_30_days": 7,
+      "future_dates": 0,
+      "oldest_date": "2025-08-14T16:50:21+00:00",
+      "newest_date": "2026-10-27T17:05:06+00:00"
+    },
+    "himalayas": {
+      "count": 96,
+      "parseable_dates": 96,
+      "within_1_day": 2,
+      "within_7_days": 27,
+      "older_than_14_days": 54,
+      "older_than_30_days": 30,
+      "future_dates": 0,
+      "oldest_date": "2026-08-31T05:25:31+00:00",
+      "newest_date": "2026-10-27T21:05:43+00:00"
+    },
+    "jobicy": {
+      "count": 138,
+      "parseable_dates": 138,
+      "within_1_day": 38,
+      "within_7_days": 138,
+      "older_than_14_days": 0,
+      "older_than_30_days": 0,
+      "future_dates": 0,
+      "oldest_date": "2026-10-23T00:00:00+00:00",
+      "newest_date": "2026-10-28T00:00:00+00:00"
+    },
+    "remoteok": {
+      "count": 63,
+      "parseable_dates": 63,
+      "within_1_day": 0,
+      "within_7_days": 11,
+      "older_than_14_days": 37,
+      "older_than_30_days": 24,
+      "future_dates": 0,
+      "oldest_date": "2026-08-16T00:00:03+00:00",
+      "newest_date": "2026-10-26T08:00:06+00:00"
+    },
+    "remotive": {
+      "count": 11,
+      "parseable_dates": 11,
+      "within_1_day": 0,
+      "within_7_days": 2,
+      "older_than_14_days": 7,
+      "older_than_30_days": 0,
+      "future_dates": 0,
+      "oldest_date": "2026-09-30T13:15:26+00:00",
+      "newest_date": "2026-10-26T12:20:09+00:00"
+    }
+  },
+  "database": {
+    "rows_read": 7305,
+    "scan_limit_reached": false,
+    "last_seen_cutoff_utc": "2026-10-14T13:59:57.784913+00:00",
+    "older_than_cutoff": 6976,
+    "stale_ids_in_search": 0,
+    "newest_fetched_at_by_source": {
+      "adzuna": "2026-10-28T13:58:45.854386+00:00",
+      "himalayas": "2026-10-28T13:58:45.854386+00:00",
+      "indeed": "2026-05-18T19:06:38.934850+00:00",
+      "jobicy": "2026-10-28T13:58:45.854386+00:00",
+      "jsearch": "2026-09-10T08:05:01.015710+00:00",
+      "linkedin": "2026-05-18T18:56:30.737741+00:00",
+      "remoteok": "2026-10-28T13:58:45.854386+00:00",
+      "remotive": "2026-10-28T13:58:45.854386+00:00"
+    }
+  }
+}
