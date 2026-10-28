@@ -44,8 +44,9 @@ class CoverLetterResponse(BaseModel):
 
 
 class SkillGapRequest(BaseModel):
-    user_skills: str = ""
-    job_required_skills: str = Field(..., min_length=3)
+    user_skills: str = Field("", max_length=8000)
+    job_required_skills: str = Field("", max_length=8000)
+    job_description: str = Field("", max_length=16000)
 
 
 class CourseSuggestion(BaseModel):
@@ -138,6 +139,7 @@ async def skill_gap(
         result = await ai_gemini.run_skill_gap(
             body.user_skills,
             body.job_required_skills,
+            body.job_description,
         )
         courses = [CourseSuggestion(**c) for c in result["courses"]]
         return SkillGapResponse(

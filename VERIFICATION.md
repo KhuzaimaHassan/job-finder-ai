@@ -1,4 +1,4 @@
-# Major reliability fixes — verification
+# Reliability and responsive UI — verification
 
 Verified locally on 28 October 2026 before pushing this change.
 
@@ -18,7 +18,7 @@ Verified locally on 28 October 2026 before pushing this change.
 | --- | --- |
 | Default Next.js production build (Turbopack) | Passed, including TypeScript and static page generation |
 | ESLint | Passed |
-| Backend regression suite | 12 tests passed |
+| Backend regression suite | 20 tests passed |
 | Real Himalayas API smoke | Three results parsed with valid dates |
 | Real Gemini embedding smoke | Successful 3,072-dimensional embedding from synthetic text |
 | Real PDF extraction + live Gemini parsing | Passed using a generated synthetic resume; no database writes |
@@ -41,12 +41,33 @@ and PDF, failed/timeout embedding requests falling back consistently, malformed
 provider records, refreshed existing job persistence, archived tracker lookup, and
 embedding cache invalidation by content.
 
-## Deliberately deferred
+## Responsive UI and product corrections
 
-Responsive layout and visual polish, typography, employment-type filtering, skill
-tag quality, tracker notes/timestamps/idempotency, experience-year calculations,
-and broader deployment/database provisioning remain for the next pass. JSearch
-has not been re-enabled and no paid provider quota has been changed.
+- Mobile navigation keeps all four destinations available; typography uses Geist with a system fallback. Interactive controls have visible focus and touch-friendly spacing.
+- Profile fields, upload actions, job headers, AI panels and dialogs adapt to narrow phones. Wide preformatted job content scrolls inside its container.
+- Tracker uses a stage-filtered card list on phones and a horizontally scrolling board from tablet width. Status menus work without dragging; notes have a native editor, persistence, and error handling. Desktop keyboard dragging was verified after enabling the dedicated button handle.
+- Remote and employment type filters combine independently. Employment terms and skill tags use token boundaries; explicit office requirements override remote-board defaults.
+- Resume synchronization merges skills while preserving manually entered experience years and target roles.
+- Tracker writes update timestamps, maintain actual application dates, and use deterministic UUID primary keys for concurrent duplicate-save protection without a schema migration.
+- Skill-gap analysis receives the job description and offers only reviewed official resource URLs. AI input is treated as untrusted reference material and parsed data is validated.
+- Setup SQL includes jobs, a private PDF storage bucket and user-folder policies for new installations. This SQL was reviewed but was not executed against production; the release uses existing schema columns.
+
+Additional checks on 28 October 2026:
+
+| Check | Result |
+| --- | --- |
+| Phone widths 320 and 375, tablet 768, desktop 1440 | No page-level horizontal overflow on the reviewed layouts; board/code overflow remains internal |
+| Mobile navigation and profile | Navigation works; explicit Add buttons and save feedback work; values survive reload |
+| Combined Remote + Full-time filters | Correct two matching fixtures, excluding the part-time job |
+| Long title/company and wide code block | Wrapped title/company, stacked actions, internally scrolling code at 320px |
+| Phone tracker notes/status/filter | Multiline notes and status survive reload; empty-stage feedback works |
+| Desktop keyboard drag | Applied to Interview persists after reload |
+| Phone PDF upload and AI panels | PDF extracted; all four panels render; interview answer expands; Escape closes modal |
+| Resume sync | Six years and Platform Engineer preference preserved; SQL/FastAPI added |
+| Final browser console | No warnings or errors |
+| Live Gemini parse and skill-gap smoke | Synthetic PDF parsed with typed fields; Docker gap returned the reviewed official Docker URL |
+
+The browser fixture remains disposable and uses deterministic AI; live provider smoke tests are separate. Tests do not establish production OAuth, storage policies or authenticated mutations. JSearch has not been re-enabled and no paid provider quota has been changed.
 
 Existing resume versions are retained rather than deleted. A separate explicit
 retention/cleanup policy can be added later. Job search freshness defaults to 14
@@ -57,3 +78,5 @@ schedule outside the cloud API deployment.
 Local browser builds embed fixture URLs. Rebuild normally with real environment
 values before deployment; use `app.main:app`, never `tests.browser_app:app`, for the
 production backend.
+
+The existing Gemini chat SDK emits a deprecation warning. Live synthetic calls still pass; migration to the replacement SDK remains a separate maintenance item.

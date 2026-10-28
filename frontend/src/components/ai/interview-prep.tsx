@@ -40,8 +40,8 @@ export function InterviewPrep({ jobTitle, jobDescription, userSkills }: Intervie
   };
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-purple-400" /> Interview Prep
         </h3>

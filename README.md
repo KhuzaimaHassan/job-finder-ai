@@ -3,7 +3,7 @@
 # 🤖 Job Finder AI 
 ### Your Intelligent Career Companion
 
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Supabase](https://img.shields.io/badge/Supabase-Database_%26_Auth-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Google Gemini](https://img.shields.io/badge/Google_Gemini-AI_Powered-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
@@ -55,7 +55,7 @@ We selected our stack to optimize for **type-safety, raw performance, and AI int
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | React, Next.js 15 (App Router), TypeScript | Server-Side Rendering, SEO, Type-safe components |
+| **Frontend** | React, Next.js 16 (App Router), TypeScript | Server-Side Rendering, SEO, Type-safe components |
 | **Styling & UI** | Tailwind CSS v4, shadcn/ui, Lucide | Dark-mode glassmorphism, responsive native layouts |
 | **Backend** | Python 3.12, FastAPI, Pydantic, Uvicorn | High-concurrency async API, strict schema validation |
 | **Artificial Intelligence** | Google Gemini 2.5 Flash | Fast, token-efficient LLM inference and PDF parsing |
@@ -131,7 +131,7 @@ job-finder-ai/
 We've made bootstrapping the environment as frictionless as possible.
 
 ### Prerequisites
-- Node.js (v18+)
+- Node.js (v20.9+, Node 22 recommended)
 - Python (v3.11+)
 - API Keys: [Supabase](https://supabase.com/), [Google AI Studio](https://aistudio.google.com/), [Adzuna](https://developer.adzuna.com/)
 
@@ -221,7 +221,7 @@ at build time. Production must continue using `app.main:app` as its backend entr
 
 ## 🚢 Deployment Strategy
 
-The application is fully configured for CI/CD via GitHub integrations.
+The hosted frontend and backend deploy through their existing GitHub integrations when changes are merged to `main`. Run the local checks above before merging. The frontend `X-App-Revision` response header and backend `/api/health` revision expose the deployed Git SHA for release verification.
 
 - **Frontend (Vercel):** Connect your fork to Vercel. Ensure `Root Directory` is set to `frontend`. Populate the environment variables. Pushes to `main` auto-deploy to edge networks.
 - **Backend (Render):** Connect your fork to Render via a Blueprint deployment. Render natively reads `render.yaml` to provision a Python web service, install dependencies, and expose the dynamic `$PORT`.

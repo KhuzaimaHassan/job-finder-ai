@@ -4,128 +4,76 @@ import { useAuth } from "@/contexts/auth-context";
 import { BriefcaseBusiness, FileText, UserCircle, LogOut, Menu, X, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+const NAV_ITEMS = [
+  { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { name: "Applications", path: "/applications", icon: BriefcaseBusiness },
+  { name: "Resume", path: "/resume", icon: FileText },
+  { name: "Profile", path: "/profile", icon: UserCircle },
+];
 
 export function Navbar() {
   const { user, signOut } = useAuth();
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const accountRef = useRef<HTMLDivElement>(null);
 
-  const navItems = [
-    { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-    { name: "Applications", path: "/applications", icon: BriefcaseBusiness },
-    { name: "Resume", path: "/resume", icon: FileText },
-    { name: "Profile", path: "/profile", icon: UserCircle },
-  ];
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (!accountRef.current?.contains(event.target as Node)) setAccountOpen(false);
+      if (!navRef.current?.contains(event.target as Node)) setMobileOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setMobileOpen(false); setAccountOpen(false); }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
+  }, []);
+
+  const navLinks = (mobile: boolean) => NAV_ITEMS.map(({ name, path, icon: Icon }) => (
+    <Link key={path} href={path} aria-current={pathname === path ? "page" : undefined}
+      onClick={() => setMobileOpen(false)}
+      className={`flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${mobile ? "w-full" : ""} ${pathname === path ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-800/60 hover:text-white"}`}>
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />{name}
+    </Link>
+  ));
 
   return (
-    <nav className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md sticky top-0 z-50">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 justify-between items-center">
-          {/* Left: Logo + hamburger + desktop nav */}
-          <div className="flex items-center gap-6 min-w-0">
-            {/* Hamburger — mobile only */}
-            <button
-              className="md:hidden p-1.5 text-zinc-400 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Toggle menu"
-            >
-              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-
-            {/* Logo */}
-            <Link href="/dashboard" className="flex items-center gap-2 shrink-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
-                <BriefcaseBusiness className="h-5 w-5" />
-              </div>
-              <span className="text-lg font-bold tracking-tight text-zinc-100 hidden xs:inline sm:inline">
-                JobFinder <span className="text-indigo-400">AI</span>
-              </span>
-            </Link>
-
-            {/* Desktop nav */}
-            <div className="hidden md:flex items-center space-x-1">
-              {navItems.map((item) => {
-                const isActive = pathname === item.path;
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.path}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-zinc-800 text-zinc-100"
-                        : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
-                    }`}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.name}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right: User menu */}
-          <div className="flex items-center gap-3 shrink-0">
-            {user && (
-              <div className="relative">
-                <button
-                  onClick={() => setMenuOpen(!menuOpen)}
-                  className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 p-1 sm:pr-3 transition-colors hover:border-zinc-700 focus:outline-none"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-sm font-bold shrink-0">
-                    {user.email?.charAt(0).toUpperCase() || "U"}
-                  </div>
-                  <span className="hidden sm:inline text-sm font-medium text-zinc-300 max-w-[100px] truncate">
-                    {user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0]}
-                  </span>
-                </button>
-
-                {menuOpen && (
-                  <>
-                    {/* Backdrop to close */}
-                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div className="absolute right-0 mt-2 w-48 origin-top-right rounded-xl border border-zinc-800 bg-zinc-900 py-1 shadow-lg z-20">
-                      <p className="px-4 py-2 text-xs text-zinc-500 truncate border-b border-zinc-800 mb-1">
-                        {user.email}
-                      </p>
-                      <button
-                        onClick={() => { setMenuOpen(false); signOut(); }}
-                        className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
-                      >
-                        <LogOut className="h-4 w-4" />
-                        Sign out
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+    <nav ref={navRef} aria-label="Main navigation" className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-md">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-indigo-600 focus:p-3 focus:text-white">Skip to content</a>
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 px-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          <button type="button" aria-label={mobileOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileOpen} aria-controls="mobile-navigation"
+            onClick={() => { setMobileOpen(!mobileOpen); setAccountOpen(false); }}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-zinc-300 hover:bg-zinc-800 lg:hidden">
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+          <Link href="/dashboard" aria-label="JobFinder AI dashboard" className="flex min-w-0 items-center gap-2 text-base font-bold tracking-tight text-white sm:text-lg">
+            <BriefcaseBusiness className="h-8 w-8 shrink-0 rounded-lg bg-indigo-500/15 p-1.5 text-indigo-400" aria-hidden="true" />
+            <span className="whitespace-nowrap">JobFinder <span className="text-indigo-400">AI</span></span>
+          </Link>
+          <div className="hidden items-center gap-1 lg:flex">{navLinks(false)}</div>
         </div>
+        {user && <div ref={accountRef} className="relative shrink-0">
+          <button type="button" aria-label="Account options" aria-expanded={accountOpen} aria-controls="account-options"
+            onClick={() => { setAccountOpen(!accountOpen); setMobileOpen(false); }}
+            className="flex min-h-11 items-center gap-2 rounded-full border border-zinc-800 p-1 sm:pr-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white" aria-hidden="true">{user.email?.charAt(0).toUpperCase() || "U"}</span>
+            <span className="hidden max-w-28 truncate text-sm text-zinc-300 sm:block">{user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0]}</span>
+          </button>
+          {accountOpen && <div id="account-options" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl">
+            <p className="break-all border-b border-zinc-800 px-2 py-3 text-xs text-zinc-400">{user.email}</p>
+            <button type="button" onClick={async () => { try { await signOut(); setAccountOpen(false); } catch { toast.error("Could not sign out. Please try again."); } }}
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm text-zinc-200 hover:bg-zinc-800"><LogOut className="h-4 w-4" />Sign out</button>
+          </div>}
+        </div>}
       </div>
-
-      {/* Mobile Menu Drawer */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-md px-4 py-3 space-y-1 overflow-y-auto max-h-[80vh]">
-          {navItems.map((item) => (
-            <Link
-              key={item.name}
-              href={item.path}
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                pathname === item.path
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
-              }`}
-            >
-              <item.icon className="h-5 w-5" />
-              {item.name}
-            </Link>
-          ))}
-        </div>
-      )}
+      {mobileOpen && <div id="mobile-navigation" className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-zinc-800 px-3 py-2 lg:hidden">{navLinks(true)}</div>}
     </nav>
   );
 }

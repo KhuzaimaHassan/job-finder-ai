@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 
 export function SearchBar({ onSearch }: { onSearch: (query: string) => void }) {
   const [value, setValue] = useState("");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
@@ -36,6 +37,7 @@ export function SearchBar({ onSearch }: { onSearch: (query: string) => void }) {
             placeholder="Search jobs... e.g. python, AI, data science"
             className="border-0 bg-transparent text-white placeholder:text-gray-500 text-sm sm:text-base py-3 sm:py-4 pl-2 pr-2 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none min-w-0"
             id="job-search-input"
+            aria-label="Search jobs"
           />
           <button
             type="submit"

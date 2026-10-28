@@ -9,6 +9,16 @@ import json
 import logging
 from typing import Optional
 from app.config import settings
+from app.services.ai_prompts import UNTRUSTED_INPUT_RULES, GEMINI_AI_MODEL_ID
+from pydantic import BaseModel, Field
+
+
+class ParsedResume(BaseModel):
+    skills: list[str] = Field(default_factory=list)
+    education: list[dict] = Field(default_factory=list)
+    experience: list[dict] = Field(default_factory=list)
+    projects: list[dict] = Field(default_factory=list)
+    summary: str = ""
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +50,8 @@ async def parse_resume_with_gemini(raw_text: str) -> dict:
     import google.generativeai as genai
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(settings.GEMINI_AI_MODEL or GEMINI_AI_MODEL_ID,
+                                  system_instruction=UNTRUSTED_INPUT_RULES)
 
     prompt = f"""Analyze this resume and extract structured data. Return ONLY valid JSON with no markdown formatting.
 
@@ -78,11 +89,10 @@ Return ONLY the JSON object, no markdown code blocks, no explanation."""
             "projects": parsed.get("projects", []),
             "summary": parsed.get("summary", ""),
         }
-        return result
+        return ParsedResume.model_validate(result).model_dump()
 
     except json.JSONDecodeError as e:
         logger.error(f"Gemini returned invalid JSON: {e}")
-        logger.error(f"Response was: {response_text[:500]}")
         raise ValueError("Failed to parse Gemini response as JSON")
     except Exception as e:
         logger.error(f"Gemini API error: {e}")

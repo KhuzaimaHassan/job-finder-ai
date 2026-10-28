@@ -5,8 +5,9 @@ User profile CRUD endpoints.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime, timezone
 from app.services.auth import get_current_user
 from app.services.supabase_client import get_supabase, get_user_supabase
 from app.services.embeddings import clear_user_embedding
@@ -15,15 +16,15 @@ router = APIRouter(prefix="/api/profile", tags=["profile"])
 
 
 class ProfileUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=200)
     skills: Optional[List[str]] = None
-    experience_years: Optional[int] = None
+    experience_years: Optional[int] = Field(None, ge=0, le=50)
     target_roles: Optional[List[str]] = None
     location: Optional[str] = None
 
 
 @router.get("")
-async def get_profile(user: dict = Depends(get_current_user)):
+def get_profile(user: dict = Depends(get_current_user)):
     """Get the current user's profile."""
     supabase = get_user_supabase(user["token"])
     result = supabase.table("profiles").select("*").eq("user_id", user["id"]).execute()
@@ -46,7 +47,7 @@ async def get_profile(user: dict = Depends(get_current_user)):
 
 
 @router.patch("")
-async def update_profile(
+def update_profile(
     updates: ProfileUpdate,
     user: dict = Depends(get_current_user),
 ):
@@ -56,6 +57,7 @@ async def update_profile(
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     result = (
         supabase.table("profiles")
@@ -77,7 +79,7 @@ async def update_profile(
 
 
 @router.post("/sync-from-resume")
-async def sync_from_resume(user: dict = Depends(get_current_user)):
+def sync_from_resume(user: dict = Depends(get_current_user)):
     """Populate profile skills and info from the latest parsed resume."""
     supabase = get_user_supabase(user["token"])
 
@@ -98,21 +100,15 @@ async def sync_from_resume(user: dict = Depends(get_current_user)):
 
     # Extract data for profile
     update_data = {}
+    current = supabase.table("profiles").select("*").eq("user_id", user["id"]).execute().data
     if resume.get("skills"):
-        update_data["skills"] = resume["skills"]
-
-    # Try to guess experience years from experience entries
-    exp = resume.get("experience", [])
-    if isinstance(exp, list) and len(exp) > 0:
-        update_data["experience_years"] = len(exp)
-
-    # Extract role titles as target roles
-    if isinstance(exp, list):
-        roles = [e.get("title", "") for e in exp if isinstance(e, dict) and e.get("title")]
-        if roles:
-            update_data["target_roles"] = roles[:5]
+        existing_skills = current[0].get("skills", []) if current else []
+        update_data["skills"] = list(dict.fromkeys([*existing_skills, *resume["skills"]]))
+    # Experience and target roles are user decisions. Job count is not tenure,
+    # and past titles must not overwrite the user's desired future roles.
 
     if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         supabase.table("profiles").update(update_data).eq("user_id", user["id"]).execute()
         clear_user_embedding(user["id"])
 

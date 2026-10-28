@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from app.config import settings
 from app.schemas.jobs import Job
+from app.services.job_normalization import contains_skill
 
 try:
     from supabase import create_client as _sb_create
@@ -90,6 +91,8 @@ def _job_from_row(row: dict) -> Job:
     payload["tags"] = row.get("tags") or []
     posted = row.get("posted_date")
     payload["posted_date"] = None if str(posted).lower() in ("none", "nan", "") else str(posted)
+    # Rebuild technical tags from the posting; older rows used substring tags.
+    payload["tags"] = _extract_tags(f"{row.get('title', '')} {row.get('description', '')}")
     return Job(**payload)
 
 KNOWN_TAGS = [
@@ -157,7 +160,7 @@ def _is_relevant_job(job: 'Job') -> bool:
     # 1. Remote jobs → always keep
     if job_type_lower == "remote":
         return True
-    if any(marker in loc_lower for marker in GLOBAL_LOCATION_MARKERS):
+    if job_type_lower not in ("onsite", "hybrid") and any(marker in loc_lower for marker in GLOBAL_LOCATION_MARKERS):
         return True
 
     # 2. Pakistan jobs → always keep
@@ -183,8 +186,7 @@ def _is_relevant_job(job: 'Job') -> bool:
 
 def _extract_tags(text: str) -> List[str]:
     """Extract relevant technology tags from text."""
-    text_lower = text.lower()
-    return [tag for tag in KNOWN_TAGS if tag.lower() in text_lower][:10]
+    return [tag for tag in KNOWN_TAGS if contains_skill(text, tag)][:10]
 
 
 def _format_salary(min_val, max_val, currency: str = "$") -> Optional[str]:
@@ -373,6 +375,7 @@ async def fetch_remotive_jobs(
                     description=desc,
                     url=item.get("url", ""),
                     source="remotive",
+                    employment_type=item.get("job_type"),
                     posted_date=item.get("publication_date", ""),
                     tags=(tags[:10] if tags else _extract_tags(desc)),
                     job_type="remote",
@@ -667,6 +670,7 @@ def _parse_himalayas_job(item: dict) -> Job:
         description=desc,
         url=apply_url,
         source="himalayas",
+        employment_type=item.get("employmentType"),
         posted_date=_normalized_date(posted),
         tags=(tags_raw[:10] if tags_raw else _extract_tags(combined)),
         job_type="remote",
@@ -738,6 +742,7 @@ async def fetch_jobicy_jobs(
                     description=desc,
                     url=apply_url,
                     source="jobicy",
+                    employment_type=" ".join(item.get("jobType") or []) if isinstance(item.get("jobType"), list) else item.get("jobType"),
                     posted_date=posted[:10] if posted else "",
                     tags=tags,
                     job_type="remote",
@@ -1011,6 +1016,7 @@ def search_jobs(
     source: Optional[str] = None,
     page: int = 1,
     per_page: int = 20,
+    employment_type: Optional[str] = None,
 ) -> tuple[List[Job], int]:
     """Search and filter the in-memory job cache. Returns (paginated_jobs, total)."""
     jobs = list(_job_store.values())
@@ -1033,7 +1039,7 @@ def search_jobs(
         if loc == "remote":
             jobs = [
                 j for j in jobs
-                if j.job_type == "remote" or "remote" in j.location.lower()
+                if j.job_type == "remote" or (j.job_type not in ("onsite", "hybrid") and "remote" in j.location.lower())
             ]
         elif loc in ("pakistan", "pk"):
             # "Pakistan" filter should match ALL Pakistani cities, not just the
@@ -1057,22 +1063,16 @@ def search_jobs(
             jobs = [
                 j
                 for j in jobs
-                if j.job_type == "remote" or "remote" in j.location.lower()
+                if j.job_type == "remote" or (j.job_type not in ("onsite", "hybrid") and "remote" in j.location.lower())
             ]
-        elif jt in ("fulltime", "full time"):
-            jobs = [
-                j
-                for j in jobs
-                if "full" in (j.title + " " + j.description[:300]).lower()
-            ]
-        elif jt in ("parttime", "part time"):
-            jobs = [
-                j
-                for j in jobs
-                if "part" in (j.title + " " + j.description[:300]).lower()
-            ]
-        elif jt == "internship":
-            jobs = [j for j in jobs if "intern" in j.title.lower()]
+        elif jt in ("onsite", "hybrid"):
+            jobs = [j for j in jobs if j.job_type == jt]
+        elif jt in ("fulltime", "full time", "parttime", "part time", "internship", "contract"):
+            employment_type = jt.replace(" ", "")
+
+    if employment_type:
+        kind = employment_type.lower().replace("-", "").replace("_", "").replace(" ", "")
+        jobs = [j for j in jobs if j.employment_type == kind]
 
     # Source filter
     if source:

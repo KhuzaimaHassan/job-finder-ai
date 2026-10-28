@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DOMPurify from 'dompurify';
 import { getJob, getProfile, getResumeInfo, createApplication, type Job, type UserProfileRow } from "@/lib/api";
@@ -8,7 +8,8 @@ import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
 import { AICopilotDrawer } from "@/components/ai-copilot-drawer";
-import { cleanJobDescription } from "@/lib/utils";
+import { cleanJobDescription, safeExternalUrl, postedDateLabel } from "@/lib/utils";
+import { apiErrorMessage } from "@/lib/errors";
 
 function JobDetailPageContent() {
   const params = useParams();
@@ -20,6 +21,11 @@ function JobDetailPageContent() {
   // User profile & resume data needed for AI features
   const [userProfile, setUserProfile] = useState<UserProfileRow | null>(null);
   const [resumeText, setResumeText] = useState<string | null>(null);
+  const [resumeSkills, setResumeSkills] = useState<string[]>([]);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const [tracked, setTracked] = useState(false);
+  const trackingRequest = useRef(false);
 
   useEffect(() => {
     const fetchJobAndUser = async () => {
@@ -44,9 +50,11 @@ function JobDetailPageContent() {
           const resume = await getResumeInfo();
           if (resume.parsed) {
             setResumeText(resume.raw_text ?? null);
+            setResumeSkills(resume.skills ?? []);
           }
         } catch (e) {
           console.error("Could not fetch resume", e);
+          setContextError("Your resume could not be loaded. Refresh this page before using AI tools.");
         }
 
       } catch (err: unknown) {
@@ -89,15 +97,17 @@ function JobDetailPageContent() {
     );
   }
 
-  const userSkills = userProfile?.skills || [];
+  const userSkills = [...new Set([...(userProfile?.skills || []), ...resumeSkills])];
   const requiredSkills = job.tags || [];
+  const applyUrl = safeExternalUrl(job.url);
 
   return (
     <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <main id="main-content" className="w-full min-w-0 max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-28">
+          {contextError && <p role="alert" className="mb-5 rounded-lg bg-amber-500/10 p-4 text-sm text-amber-200">{contextError}</p>}
           {job.is_active === false && (
             <p role="status" className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
               Archived listing: this job has not been recently verified. It is kept here for your application history.
@@ -116,18 +126,23 @@ function JobDetailPageContent() {
               <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 md:p-8">
                 <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                   <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">{job.title}</h1>
+                    <h1 className="break-words text-2xl md:text-3xl font-bold text-white mb-3">{job.title}</h1>
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-zinc-400">
                       <span className="flex items-center gap-1.5"><Building className="w-4 h-4" /> {job.company}</span>
                       <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {job.location || "Remote"}</span>
                       {job.job_type && <span className="flex items-center gap-1.5"><Briefcase className="w-4 h-4" /> {job.job_type}</span>}
-                      {job.posted_date && <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {new Date(job.posted_date).toLocaleDateString()}</span>}
+                      {job.employment_type && <span>{job.employment_type.replace("time", "-time")}</span>}
+                      {job.posted_date && <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {postedDateLabel(job.posted_date)}</span>}
                     </div>
                   </div>
                   
-                  <div className="flex flex-col xs:flex-row sm:flex-row items-stretch gap-3 w-full sm:w-auto mt-4 lg:mt-0">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch gap-3 w-full sm:w-auto mt-4 lg:mt-0">
                     <button
+                      disabled={tracking || tracked}
                       onClick={async () => {
+                        if (trackingRequest.current || tracked) return;
+                        trackingRequest.current = true;
+                        setTracking(true);
                         try {
                           await createApplication({
                             job_id: job.id,
@@ -135,16 +150,20 @@ function JobDetailPageContent() {
                             company: job.company
                           });
                           import("sonner").then(m => m.toast.success("Added to Tracker!"));
-                        } catch {
-                          import("sonner").then(m => m.toast.error("Failed to add to tracker"));
+                          setTracked(true);
+                        } catch (err) {
+                          import("sonner").then(m => m.toast.error(apiErrorMessage(err, "Could not save this job. Please try again.")));
+                        } finally {
+                          trackingRequest.current = false;
+                          setTracking(false);
                         }
                       }}
-                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-medium transition-colors whitespace-nowrap text-sm"
+                      className="min-h-11 flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-medium transition-colors text-sm disabled:opacity-60"
                     >
-                      Add to Tracker
+                      {tracking ? "Saving…" : tracked ? "Saved to Tracker" : "Add to Tracker"}
                     </button>
-                    {job.is_active !== false && <a
-                      href={job.url}
+                    {job.is_active !== false && applyUrl && <a
+                      href={applyUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors whitespace-nowrap text-sm"
@@ -174,7 +193,6 @@ function JobDetailPageContent() {
                   <h3 className="text-lg font-semibold text-white mb-3">Job Description</h3>
                   <div 
                     className="job-description text-base text-zinc-300 leading-relaxed"
-                    style={{ fontFamily: "'Times New Roman', Times, serif" }}
                     dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cleanJobDescription(job.description)) }}
                   />
                 </div>
@@ -194,5 +212,6 @@ function JobDetailPageContent() {
 }
 
 export default function JobDetailPage() {
-  return <AuthGuard><JobDetailPageContent /></AuthGuard>;
+  const params = useParams();
+  return <AuthGuard><JobDetailPageContent key={String(params.id)} /></AuthGuard>;
 }

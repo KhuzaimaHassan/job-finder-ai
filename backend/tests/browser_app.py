@@ -42,6 +42,13 @@ for id, title, tags in [("local_python", "Python Engineer", ["Python", "SQL", "F
         "location": "Remote", "description": "Build Python and SQL services with FastAPI. Requires testing, Docker and engineering experience.",
         "url": "https://example.invalid/apply", "source": "remoteok", "posted_date": now,
         "job_type": "remote", "tags": tags, "fetched_at": now, "salary": None})
+db.rows["jobs"][0]["description"] += " This is a full-time role."
+db.rows["jobs"][1]["description"] += " This is a part-time role."
+db.rows["jobs"].append({**db.rows["jobs"][0], "id": "local_long",
+    "title": "Senior Platform Engineer for Distributed Data and Machine Learning Infrastructure",
+    "company": "Example Company With A Deliberately Long Name For Layout Verification",
+    "description": "<p>Full-time engineering position. Python, Docker and SQL.</p><pre>" + "very_long_code_" * 40 + "</pre>",
+    "tags": ["Python", "Docker", "SQL"]})
 job_fetcher._job_store = {row["id"]: job_fetcher._job_from_row(row) for row in db.rows["jobs"]}
 job_fetcher._get_supabase_client = lambda: db
 for module in (profile, resume, applications, jobs):

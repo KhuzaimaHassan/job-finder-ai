@@ -47,6 +47,10 @@ class MemoryStorage:
             self.files.pop(path, None)
 
 
+class UniqueViolation(Exception):
+    code = "23505"
+
+
 class MemoryQuery:
     def __init__(self, db, table):
         self.db, self.name = db, table
@@ -81,6 +85,8 @@ class MemoryQuery:
                     record.setdefault("updated_at", now)
                     record.setdefault("applied_date", now)
                 old = next((r for r in rows if r.get("id") == record["id"]), None)
+                if self.operation == "insert" and old is not None:
+                    raise UniqueViolation("Duplicate primary key")
                 if self.operation == "upsert" and old is not None:
                     old.update(record)
                 else:

@@ -6,13 +6,17 @@ const FILTER_OPTIONS = [
   { key: "location", value: "karachi", label: "📍 Karachi" },
   { key: "location", value: "lahore", label: "📍 Lahore" },
   { key: "location", value: "islamabad", label: "📍 Islamabad" },
-  { key: "job_type", value: "fulltime", label: "💼 Full-time" },
-  { key: "job_type", value: "parttime", label: "⏰ Part-time" },
-  { key: "job_type", value: "internship", label: "🎓 Internship" },
+  { key: "employment_type", value: "fulltime", label: "💼 Full-time" },
+  { key: "employment_type", value: "parttime", label: "⏰ Part-time" },
+  { key: "employment_type", value: "internship", label: "🎓 Internship" },
+  { key: "employment_type", value: "contract", label: "Contract" },
   { key: "source", value: "indeed", label: "Indeed" },
   { key: "source", value: "google", label: "Google Jobs" },
   { key: "source", value: "remoteok", label: "RemoteOK" },
   { key: "source", value: "remotive", label: "Remotive" },
+  { key: "source", value: "himalayas", label: "Himalayas" },
+  { key: "source", value: "jobicy", label: "Jobicy" },
+  { key: "source", value: "adzuna", label: "Adzuna" },
 ];
 
 interface FilterPillsProps {
@@ -39,7 +43,8 @@ export function FilterPills({ filters, onFilterChange }: FilterPillsProps) {
           <button
             key={`${key}-${value}`}
             onClick={() => handleClick(key, value)}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium border transition-all duration-200 ${
+            aria-pressed={active}
+            className={`min-h-10 px-3 py-2 rounded-full text-xs sm:text-sm font-medium border transition-all duration-200 ${
               active
                 ? "bg-purple-600/20 border-purple-500/50 text-purple-300 shadow-lg shadow-purple-500/10"
                 : "bg-white/[0.03] border-white/[0.08] text-gray-400 hover:bg-white/[0.06] hover:border-white/[0.15] hover:text-gray-300"
@@ -55,6 +60,7 @@ export function FilterPills({ filters, onFilterChange }: FilterPillsProps) {
         <button
           onClick={() => {
             onFilterChange("job_type", undefined);
+            onFilterChange("employment_type", undefined);
             onFilterChange("location", undefined);
             onFilterChange("source", undefined);
           }}

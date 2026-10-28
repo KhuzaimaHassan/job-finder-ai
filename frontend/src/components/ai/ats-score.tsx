@@ -48,7 +48,7 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
 
   if (!result && !loading) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
         <h3 className="text-lg font-semibold mb-2">ATS Compatibility Score</h3>
         <p className="text-sm text-zinc-400 mb-4">
           See how well your resume matches this job description before applying.
@@ -66,7 +66,7 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
 
   if (loading) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center min-h-[200px]">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6 flex flex-col items-center justify-center min-h-[200px]">
         <Loader2 className="h-8 w-8 text-indigo-500 animate-spin mb-3" />
         <p className="text-sm text-zinc-400">Analyzing resume vs job description...</p>
       </div>
@@ -76,8 +76,8 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
   if (!result) return null;
 
   return (
-    <div className={`border rounded-xl p-6 ${getScoreBg(result.score)}`}>
-      <div className="flex items-center justify-between mb-4">
+    <div className={`border rounded-xl p-4 sm:p-6 ${getScoreBg(result.score)}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-lg font-semibold text-white">ATS Score</h3>
         <div className={`text-2xl font-bold ${getScoreColor(result.score)}`}>
           {result.score}%

@@ -23,6 +23,7 @@ function DashboardPageContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<{
     job_type?: string;
+    employment_type?: string;
     location?: string;
     source?: string;
   }>({});
@@ -39,6 +40,7 @@ function DashboardPageContent() {
         q: searchQuery || undefined,
         location: filters.location || undefined,
         job_type: filters.job_type || undefined,
+        employment_type: filters.employment_type || undefined,
         source: filters.source || undefined,
         page: page,
         per_page: 20,
@@ -152,9 +154,9 @@ function DashboardPageContent() {
           </section>
 
         {/* Results */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
+        <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
           {/* Result count */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-6" aria-live="polite">
             <p className="text-sm text-gray-400">
               {loading ? "Searching..." : `${total} jobs found`}
             </p>

@@ -39,9 +39,8 @@ function ResumePageContent() {
     fetchExisting();
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selected = e.target.files[0];
+  const selectFile = (selected: File) => {
+      if (uploading) return;
       if (selected.type !== "application/pdf") {
         setError("Only PDF files are supported");
         setFile(null);
@@ -56,7 +55,9 @@ function ResumePageContent() {
       setError(null);
       setSuccess(false);
       setParsedData(null);
-    }
+  };
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) selectFile(e.target.files[0]);
   };
 
   const handleUpload = async () => {
@@ -71,6 +72,7 @@ function ResumePageContent() {
 
     try {
       const { data } = await api.post(`/api/resume/upload`, formData, {
+        timeout: 120_000,
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -101,7 +103,7 @@ function ResumePageContent() {
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
+        <main id="main-content" className="w-full min-w-0 max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Resume Upload</h1>
             <p className="text-zinc-400">
@@ -118,23 +120,15 @@ function ResumePageContent() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                  const dataTransferFile = e.dataTransfer.files[0];
-                  if (dataTransferFile.type === "application/pdf") {
-                    setFile(dataTransferFile);
-                    setError(null);
-                  } else {
-                    setError("Only PDF files are supported");
-                  }
-                }
+                if (e.dataTransfer.files?.[0]) selectFile(e.dataTransfer.files[0]);
               }}
             >
               {file ? (
-                <div className="flex flex-col items-center">
+                <div className="flex w-full min-w-0 flex-col items-center">
                   <FileText className="h-12 w-12 text-indigo-400 mb-4" />
-                  <p className="text-lg font-medium text-zinc-200">{file.name}</p>
+                  <p className="max-w-full break-all text-center text-base font-medium text-zinc-200">{file.name}</p>
                   <p className="text-sm text-zinc-500 mb-6">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  <div className="flex gap-4">
+                  <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
                     <button 
                       onClick={() => setFile(null)}
                       className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white transition-colors"

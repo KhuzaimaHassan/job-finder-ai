@@ -9,9 +9,10 @@ import { Loader2, BookOpen, ExternalLink, AlertTriangle } from "lucide-react";
 interface SkillsGapProps {
   userSkills: string[];
   jobRequiredSkills: string[];
+  jobDescription: string;
 }
 
-export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapProps) {
+export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescription }: SkillsGapProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SkillGapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +23,8 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
     try {
       const data = await postAiSkillGap(
         userSkills.join(", "),
-        jobRequiredSkills.join(", ")
+        jobRequiredSkills.join(", "),
+        jobDescription
       );
       setResult(data);
     } catch (err: unknown) {
@@ -34,7 +36,7 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
 
   if (!result && !loading) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
         <h3 className="text-lg font-semibold mb-2">Skills Gap Analysis</h3>
         <p className="text-sm text-zinc-400 mb-4">
           Discover missing skills and get free course recommendations to level up.
@@ -52,7 +54,7 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
 
   if (loading) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center min-h-[200px]">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6 flex flex-col items-center justify-center min-h-[200px]">
         <Loader2 className="h-8 w-8 text-indigo-500 animate-spin mb-3" />
         <p className="text-sm text-zinc-400">Finding courses and missing skills...</p>
       </div>
@@ -62,7 +64,7 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
   if (!result) return null;
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
       <h3 className="text-lg font-semibold mb-4">Skills Gap Analysis</h3>
       
       {result.missing_skills?.length > 0 ? (
@@ -89,6 +91,9 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
           <BookOpen className="w-4 h-4" /> Recommended Free Courses
         </p>
         <div className="space-y-3">
+          {result.courses.length === 0 && result.missing_skills.length > 0 && (
+            <p className="text-sm text-zinc-400">No reviewed learning resource is available for these skills yet.</p>
+          )}
           {result.courses?.map((course, idx: number) => (
             <a
               key={idx}

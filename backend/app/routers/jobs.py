@@ -47,6 +47,7 @@ async def list_jobs(
     source: Optional[str] = Query(None, description="Source: adzuna, remoteok, remotive"),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Results per page"),
+    employment_type: Optional[str] = Query(None, description="fulltime, parttime, internship, contract"),
 ):
     """Search and filter jobs with pagination."""
     jobs, total = search_jobs(
@@ -56,6 +57,7 @@ async def list_jobs(
         source=source,
         page=page,
         per_page=per_page,
+        employment_type=employment_type,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -74,6 +76,7 @@ async def search_jobs_endpoint(
     source: Optional[str] = Query(None, description="Source filter"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    employment_type: Optional[str] = Query(None),
 ):
     """Alternative search endpoint with 'type' alias."""
     jobs, total = search_jobs(
@@ -83,6 +86,7 @@ async def search_jobs_endpoint(
         source=source,
         page=page,
         per_page=per_page,
+        employment_type=employment_type,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -101,7 +105,7 @@ async def job_stats():
     remote_count = 0
     for j in all_jobs:
         sources[j.source] = sources.get(j.source, 0) + 1
-        if j.job_type == "remote" or "remote" in j.location.lower():
+        if j.job_type == "remote":
             remote_count += 1
     return {
         "total_jobs": len(all_jobs),

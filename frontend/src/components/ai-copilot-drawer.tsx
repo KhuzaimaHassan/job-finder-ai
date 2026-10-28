@@ -59,13 +59,13 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
         onClick={(event) => {
           if (event.target === event.currentTarget) setIsOpen(false);
         }}
-        className="m-auto w-[calc(100%-2rem)] max-w-4xl max-h-none border-0 bg-transparent p-0 text-white backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+        className="m-auto w-[calc(100%-1rem)] sm:w-[calc(100%-3rem)] max-w-4xl max-h-[calc(100dvh-1rem)] border-0 bg-transparent p-0 text-white backdrop:bg-black/60 backdrop:backdrop-blur-sm"
       >
         <div 
-          className="w-full h-[95dvh] sm:h-[85vh] bg-[#0a0a0f] border border-zinc-800/80 shadow-2xl rounded-2xl flex flex-col"
+          className="w-full min-w-0 h-[calc(100dvh-1rem)] sm:h-[85dvh] bg-[#0a0a0f] border border-zinc-800/80 shadow-2xl rounded-2xl flex flex-col"
         >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800 bg-[#0a0a0f] shrink-0 rounded-t-2xl">
+        <div className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b border-zinc-800 bg-[#0a0a0f] shrink-0 rounded-t-2xl">
           <h2 id="ai-copilot-title" className="text-xl font-bold flex items-center gap-2 text-white">
             <span className="text-indigo-400"><Sparkles className="w-5 h-5" /></span> 
             AI Co-Pilot
@@ -80,7 +80,7 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6 space-y-4 sm:space-y-6 break-words">
           {!resumeText ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-4 text-zinc-400">
               <div className="p-4 bg-zinc-900 rounded-full border border-zinc-800">
@@ -104,7 +104,7 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
               </p>
               <ATSScore jobDescription={job.description} resumeText={resumeText} />
               <CoverLetter jobTitle={job.title} company={job.company} jobDescription={job.description} resumeText={resumeText} />
-              <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} />
+              <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} jobDescription={job.description} />
               <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} />
             </>
           )}
