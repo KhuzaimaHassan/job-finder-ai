@@ -16,6 +16,10 @@ services:
         sync: false
       - key: GEMINI_AI_MODEL
         value: gemini-2.5-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: JOB_CACHE_MAX_AGE_DAYS
+        value: "14"
       - key: FRONTEND_URL
         sync: false
       - key: ADZUNA_APP_ID

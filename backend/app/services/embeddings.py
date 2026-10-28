@@ -1,13 +1,16 @@
 """
 Embeddings Service
 ------------------
-Uses Gemini text-embedding-004 for embedding generation when configured.
+Uses configurable Gemini embeddings when configured.
 Falls back to keyword overlap matching when the API key is missing or calls fail.
 """
 
 import json
+import asyncio
+import hashlib
 import logging
 import re
+import httpx
 import numpy as np
 from typing import Any, List
 
@@ -16,8 +19,8 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # In-memory cache for embeddings
-_user_embeddings: dict[str, list[float]] = {}
-_job_embeddings: dict[str, list[float]] = {}
+_user_embeddings: dict[str, tuple[str, list[float]]] = {}
+_job_embeddings: dict[str, tuple[str, list[float]]] = {}
 
 _BASIC_STOPWORDS = frozenset(
     """
@@ -160,7 +163,7 @@ def _rank_jobs_keyword_based(
     scored: list[dict] = []
     for job in jobs:
         scored.append(
-            {"job": job, "match_score": _keyword_match_score(terms, job)},
+            {"job": job, "match_score": _keyword_match_score(terms, job), "match_method": "keyword"},
         )
     scored.sort(key=lambda x: x["match_score"], reverse=True)
     return scored[:top_n]
@@ -171,8 +174,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
     if len(a) != len(b):
-        n = min(len(a), len(b))
-        a, b = a[:n], b[:n]
+        raise ValueError("Embedding dimensions do not match")
     a_arr = np.array(a, dtype=float)
     b_arr = np.array(b, dtype=float)
     dot = np.dot(a_arr, b_arr)
@@ -183,37 +185,37 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(dot / (norm_a * norm_b))
 
 
-def _embedding_vector_from_result(result: Any) -> list[float]:
-    """Normalize google.generativeai embed_content return value."""
-    if isinstance(result, dict):
-        vec = result.get("embedding")
-    else:
-        vec = getattr(result, "embedding", None)
-    if vec is None:
-        raise ValueError("Unexpected embed_content response (no embedding vector)")
-    return list(vec)
+def _embedding_key(text: str) -> str:
+    return hashlib.sha256(f"{settings.GEMINI_EMBEDDING_MODEL}:{text}".encode()).hexdigest()
+
+
+async def get_embeddings(texts: list[str]) -> list[list[float]]:
+    """Batch async requests, with a bounded upstream timeout and validated vectors."""
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY not configured")
+    model = "models/" + settings.GEMINI_EMBEDDING_MODEL.removeprefix("models/")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/{model}:batchEmbedContents",
+            headers={"x-goog-api-key": settings.GEMINI_API_KEY},
+            json={"requests": [
+                {"model": model, "content": {"parts": [{"text": text[:8000]}]},
+                 "taskType": "SEMANTIC_SIMILARITY"}
+                for text in texts
+            ]},
+        )
+        response.raise_for_status()
+        items = response.json().get("embeddings", [])
+    if len(items) != len(texts):
+        raise ValueError("Embedding provider returned an incomplete batch")
+    vectors = [item.get("values", []) for item in items]
+    if any(not vector or not np.isfinite(np.asarray(vector, dtype=float)).all() for vector in vectors):
+        raise ValueError("Embedding provider returned an invalid vector")
+    return vectors
 
 
 async def get_embedding(text: str) -> list[float]:
-    """Generate embedding using Gemini text-embedding-004."""
-    if not settings.GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY not configured")
-
-    import google.generativeai as genai
-
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-
-    text = text[:8000]
-
-    try:
-        result = genai.embed_content(
-            model="models/embedding-001",
-            content=text,
-        )
-        return _embedding_vector_from_result(result)
-    except Exception as e:
-        logger.error(f"Embedding error: {e}")
-        raise ValueError(f"Failed to generate embedding: {e}")
+    return (await get_embeddings([text]))[0]
 
 
 async def get_user_embedding(user_id: str, profile: dict, resume: dict | None = None) -> list[float]:
@@ -253,20 +255,14 @@ async def get_user_embedding(user_id: str, profile: dict, resume: dict | None = 
                     )
 
     user_text = "\n".join(parts) if parts else "Data science machine learning python developer"
-
+    key = _embedding_key(user_text)
+    cached = _user_embeddings.get(user_id)
+    if cached and cached[0] == key:
+        return cached[1]
     embedding = await get_embedding(user_text)
-    _user_embeddings[user_id] = embedding
-    return embedding
-
-
-async def get_job_embedding(job_id: str, title: str, description: str) -> list[float]:
-    """Generate and cache an embedding for a job."""
-    if job_id in _job_embeddings:
-        return _job_embeddings[job_id]
-
-    job_text = f"{title}\n{description[:2000]}"
-    embedding = await get_embedding(job_text)
-    _job_embeddings[job_id] = embedding
+    if len(_user_embeddings) >= 500:
+        _user_embeddings.pop(next(iter(_user_embeddings)))
+    _user_embeddings[user_id] = (key, embedding)
     return embedding
 
 
@@ -292,27 +288,44 @@ async def rank_jobs_for_user(
         logger.info("GEMINI_API_KEY not set; using keyword-based job matching")
         return _rank_jobs_keyword_based(profile, resume, jobs, top_n)
 
+    # Shortlist before making any provider calls. Never embed thousands of jobs
+    # during one request. All scores in a response use the same method.
+    fallback = _rank_jobs_keyword_based(profile, resume, jobs, top_n)
+    candidates = _rank_jobs_keyword_based(
+        profile, resume, jobs, max(1, min(settings.MATCH_CANDIDATE_LIMIT, 100)),
+    )
+    if not candidates:
+        return []
     try:
-        user_emb = await get_user_embedding(user_id, profile, resume)
-
-        scored_jobs: list[dict] = []
-        for job in jobs:
-            try:
-                job_emb = await get_job_embedding(job.id, job.title, job.description)
-                score = await compute_match_score(user_emb, job_emb)
-                scored_jobs.append({"job": job, "match_score": score})
-            except Exception as e:
-                logger.error(f"Embedding error for job {job.id}: {e}")
-                scored_jobs.append({"job": job, "match_score": 0.0})
-
-        scored_jobs.sort(key=lambda x: x["match_score"], reverse=True)
-        return scored_jobs[:top_n]
+        async with asyncio.timeout(settings.MATCH_TIMEOUT_SECONDS):
+            user_emb = await get_user_embedding(user_id, profile, resume)
+            missing = []
+            for item in candidates:
+                job = item["job"]
+                text = f"{job.title}\n{job.description[:2000]}"
+                cached = _job_embeddings.get(job.id)
+                if not cached or cached[0] != _embedding_key(text):
+                    missing.append((job, text))
+            if missing:
+                vectors = await get_embeddings([text for _, text in missing])
+                for (job, text), vector in zip(missing, vectors):
+                    if len(_job_embeddings) >= 1000:
+                        _job_embeddings.pop(next(iter(_job_embeddings)))
+                    _job_embeddings[job.id] = (_embedding_key(text), vector)
+            scored_jobs = [
+                {"job": item["job"], "match_score": await compute_match_score(
+                    user_emb, _job_embeddings[item["job"].id][1],
+                ), "match_method": "semantic"}
+                for item in candidates
+            ]
+            scored_jobs.sort(key=lambda x: x["match_score"], reverse=True)
+            return scored_jobs[:top_n]
     except Exception as e:
         logger.warning(
             "Embedding-based ranking failed (%s); falling back to keyword matching",
             e,
         )
-        return _rank_jobs_keyword_based(profile, resume, jobs, top_n)
+        return [{**item, "match_method": "keyword"} for item in fallback]
 
 
 def clear_user_embedding(user_id: str):

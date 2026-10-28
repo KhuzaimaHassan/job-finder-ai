@@ -79,7 +79,7 @@ export function JobCard({ job }: { job: Job }) {
             </Badge>
             {job.match_score !== undefined && (
               <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-pink-500/15 text-pink-400 border-pink-500/30">
-                <span className="mr-1">✨</span> {job.match_score}% Match
+                <span className="mr-1">✨</span> {job.match_score}% {job.match_method === "keyword" ? "Keyword Match" : "Match"}
               </Badge>
             )}
           </div>

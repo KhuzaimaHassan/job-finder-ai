@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
 import { postAiResumeImprove } from "@/lib/api";
 import { Loader2, Sparkles, CheckCircle2, Circle } from "lucide-react";
 import { toast } from "sonner";
@@ -29,14 +30,8 @@ export function ResumeImprover({ resumeText }: ResumeImproverProps) {
       setImprovements(data.improvements);
       setCompleted(new Set());
       toast.success("AI analysis complete!");
-    } catch (err: any) {
-      let msg = "Failed to analyze resume";
-      if (err?.response?.data?.detail) {
-        msg = typeof err.response.data.detail === "string" 
-          ? err.response.data.detail 
-          : JSON.stringify(err.response.data.detail);
-      }
-      toast.error(msg);
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, "Failed to analyze resume"));
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
+import type { SkillGapResult } from "@/types";
 import { postAiSkillGap } from "@/lib/api";
 import { Loader2, BookOpen, ExternalLink, AlertTriangle } from "lucide-react";
 
@@ -11,7 +13,7 @@ interface SkillsGapProps {
 
 export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapProps) {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<SkillGapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
@@ -23,8 +25,8 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
         jobRequiredSkills.join(", ")
       );
       setResult(data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to analyze skills gap");
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, "Failed to analyze skills gap"));
     } finally {
       setLoading(false);
     }
@@ -57,6 +59,8 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
     );
   }
 
+  if (!result) return null;
+
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
       <h3 className="text-lg font-semibold mb-4">Skills Gap Analysis</h3>
@@ -85,7 +89,7 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills }: SkillsGapPr
           <BookOpen className="w-4 h-4" /> Recommended Free Courses
         </p>
         <div className="space-y-3">
-          {result.courses?.map((course: any, idx: number) => (
+          {result.courses?.map((course, idx: number) => (
             <a
               key={idx}
               href={course.url}

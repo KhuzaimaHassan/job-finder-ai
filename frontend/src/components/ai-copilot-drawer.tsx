@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Sparkles } from "lucide-react";
 import { ATSScore } from "@/components/ai/ats-score";
 import { CoverLetter } from "@/components/ai/cover-letter";
@@ -20,16 +20,18 @@ interface AICopilotDrawerProps {
 
 export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }: AICopilotDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   // Prevent background scrolling when drawer is open
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "unset";
-    }
+    if (!isOpen) return;
+    const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    dialog?.showModal();
+    document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "unset";
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
 
@@ -37,6 +39,8 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
     <>
       {/* Floating Action Button */}
       <button
+        aria-label="Ask AI Co-Pilot"
+        aria-haspopup="dialog"
         onClick={() => setIsOpen(true)}
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-5 py-3.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold shadow-2xl shadow-indigo-500/25 transition-all hover:scale-105 hover:-translate-y-1"
       >
@@ -44,32 +48,30 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
         <span className="hidden sm:inline">Ask AI Co-Pilot</span>
       </button>
 
-      {/* Backdrop */}
-      {isOpen && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
-
-      {/* Popup Modal */}
-      <div 
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 pointer-events-none transition-opacity duration-300 ${
-          isOpen ? "opacity-100" : "opacity-0"
-        }`}
+      {/* Native modal: closed dialogs are hidden and cannot intercept input.
+          showModal also traps focus and restores it to the launcher on close. */}
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="ai-copilot-title"
+        onClose={(event) => {
+          if (!event.currentTarget.open) setIsOpen(false);
+        }}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setIsOpen(false);
+        }}
+        className="m-auto w-[calc(100%-2rem)] max-w-4xl max-h-none border-0 bg-transparent p-0 text-white backdrop:bg-black/60 backdrop:backdrop-blur-sm"
       >
         <div 
-          className={`w-full max-w-4xl h-[95dvh] sm:h-[85vh] bg-[#0a0a0f] border border-zinc-800/80 shadow-2xl rounded-2xl flex flex-col pointer-events-auto transform transition-transform duration-300 ${
-            isOpen ? "scale-100 translate-y-0" : "scale-95 translate-y-8"
-          }`}
+          className="w-full h-[95dvh] sm:h-[85vh] bg-[#0a0a0f] border border-zinc-800/80 shadow-2xl rounded-2xl flex flex-col"
         >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-zinc-800 bg-[#0a0a0f] shrink-0 rounded-t-2xl">
-          <h2 className="text-xl font-bold flex items-center gap-2 text-white">
+          <h2 id="ai-copilot-title" className="text-xl font-bold flex items-center gap-2 text-white">
             <span className="text-indigo-400"><Sparkles className="w-5 h-5" /></span> 
             AI Co-Pilot
           </h2>
           <button 
+            aria-label="Close AI Co-Pilot"
             onClick={() => setIsOpen(false)}
             className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
           >
@@ -108,7 +110,7 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
           )}
         </div>
         </div>
-      </div>
+      </dialog>
     </>
   );
 }

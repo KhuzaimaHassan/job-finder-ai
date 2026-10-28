@@ -11,6 +11,8 @@ export interface Job {
   tags: string[];
   job_type: string | null;
   match_score?: number;
+  match_method?: "semantic" | "keyword";
+  is_active?: boolean;
 }
 
 export interface JobSearchResponse {

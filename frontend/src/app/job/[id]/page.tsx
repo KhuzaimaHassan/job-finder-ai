@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DOMPurify from 'dompurify';
-import { getJob, getProfile, getResumeInfo, createApplication, type Job } from "@/lib/api";
+import { getJob, getProfile, getResumeInfo, createApplication, type Job, type UserProfileRow } from "@/lib/api";
 import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { Loader2, ArrowLeft, ExternalLink, MapPin, Building, Briefcase, Calendar } from "lucide-react";
 import { AICopilotDrawer } from "@/components/ai-copilot-drawer";
 import { cleanJobDescription } from "@/lib/utils";
 
-export default function JobDetailPage() {
+function JobDetailPageContent() {
   const params = useParams();
   const router = useRouter();
   const [job, setJob] = useState<Job | null>(null);
@@ -18,7 +18,7 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   
   // User profile & resume data needed for AI features
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<UserProfileRow | null>(null);
   const [resumeText, setResumeText] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function JobDetailPage() {
           console.error("Could not fetch resume", e);
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Error fetching job details:", err);
         setError("Could not load job details. It might have been removed.");
       } finally {
@@ -62,20 +62,20 @@ export default function JobDetailPage() {
 
   if (loading) {
     return (
-      <AuthGuard>
+      <>
         <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
           <Navbar />
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
           </div>
         </div>
-      </AuthGuard>
+      </>
     );
   }
 
   if (error || !job) {
     return (
-      <AuthGuard>
+      <>
         <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
           <Navbar />
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
@@ -85,7 +85,7 @@ export default function JobDetailPage() {
             </button>
           </div>
         </div>
-      </AuthGuard>
+      </>
     );
   }
 
@@ -93,11 +93,16 @@ export default function JobDetailPage() {
   const requiredSkills = job.tags || [];
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+          {job.is_active === false && (
+            <p role="status" className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
+              Archived listing: this job has not been recently verified. It is kept here for your application history.
+            </p>
+          )}
           <button 
             onClick={() => router.back()}
             className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white mb-6 transition-colors"
@@ -130,7 +135,7 @@ export default function JobDetailPage() {
                             company: job.company
                           });
                           import("sonner").then(m => m.toast.success("Added to Tracker!"));
-                        } catch(e) {
+                        } catch {
                           import("sonner").then(m => m.toast.error("Failed to add to tracker"));
                         }
                       }}
@@ -138,14 +143,14 @@ export default function JobDetailPage() {
                     >
                       Add to Tracker
                     </button>
-                    <a
+                    {job.is_active !== false && <a
                       href={job.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors whitespace-nowrap text-sm"
                     >
                       Apply Now <ExternalLink className="w-4 h-4" />
-                    </a>
+                    </a>}
                   </div>
                 </div>
 
@@ -184,6 +189,10 @@ export default function JobDetailPage() {
           </div>
         </main>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function JobDetailPage() {
+  return <AuthGuard><JobDetailPageContent /></AuthGuard>;
 }

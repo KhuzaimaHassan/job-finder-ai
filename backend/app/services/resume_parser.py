@@ -25,20 +25,8 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
                     text_parts.append(page_text)
         return "\n\n".join(text_parts)
     except Exception as e:
-        logger.error(f"PDF extraction error: {e}")
-        # Fallback to PyPDF2
-        try:
-            import PyPDF2
-            reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            text_parts = []
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
-            return "\n\n".join(text_parts)
-        except Exception as e2:
-            logger.error(f"PyPDF2 fallback also failed: {e2}")
-            raise ValueError("Could not extract text from PDF")
+        logger.error("PDF extraction failed", exc_info=True)
+        raise ValueError("Could not extract text from PDF") from e
 
 
 async def parse_resume_with_gemini(raw_text: str) -> dict:

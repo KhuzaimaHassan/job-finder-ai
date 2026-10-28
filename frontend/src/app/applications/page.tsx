@@ -5,28 +5,32 @@ import { AuthGuard } from "@/components/auth-guard";
 import { Navbar } from "@/components/navbar";
 import { getApplications, updateApplication, deleteApplication, type Application } from "@/lib/api";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { Loader2, Trash2, Calendar, Building, Briefcase } from "lucide-react";
+import { Loader2, Trash2, Calendar, Building } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 
 const COLUMNS = ["Saved", "Applied", "Interview", "Offer", "Rejected"];
 
-export default function ApplicationsPage() {
+function ApplicationsPageContent() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
-  // Prevent hydration mismatch for DnD
-  const [isBrowser, setIsBrowser] = useState(false);
-
   useEffect(() => {
-    setIsBrowser(true);
-    fetchApps();
+    let active = true;
+    void getApplications().then((data) => {
+      if (active) setApplications(data);
+    }).catch(() => {
+      if (active) toast.error("Failed to load applications");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, []);
 
   const fetchApps = async () => {
     try {
       const data = await getApplications();
       setApplications(data);
-    } catch (err) {
+    } catch {
       toast.error("Failed to load applications");
     } finally {
       setLoading(false);
@@ -54,7 +58,7 @@ export default function ApplicationsPage() {
     try {
       await updateApplication(draggedAppId, { status: newStatus });
       toast.success(`Moved to ${newStatus}`);
-    } catch (err) {
+    } catch {
       toast.error("Failed to move application");
       fetchApps(); // Revert on failure
     }
@@ -66,21 +70,21 @@ export default function ApplicationsPage() {
       await deleteApplication(id);
       setApplications((prev) => prev.filter((a) => a.id !== id));
       toast.success("Application removed");
-    } catch (err) {
+    } catch {
       toast.error("Failed to remove application");
     }
   };
 
-  if (loading || !isBrowser) {
+  if (loading) {
     return (
-      <AuthGuard>
+      <>
         <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
           <Navbar />
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
           </div>
         </div>
-      </AuthGuard>
+      </>
     );
   }
 
@@ -97,7 +101,7 @@ export default function ApplicationsPage() {
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
         <Navbar />
         <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-8">
@@ -193,6 +197,10 @@ export default function ApplicationsPage() {
           </DragDropContext>
         </main>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function ApplicationsPage() {
+  return <AuthGuard><ApplicationsPageContent /></AuthGuard>;
 }

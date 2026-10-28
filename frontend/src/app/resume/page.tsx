@@ -6,15 +6,22 @@ import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { ResumeImprover } from "@/components/ai/resume-improver";
+import { apiErrorMessage } from "@/lib/errors";
 
-export default function ResumePage() {
+interface ParsedResume {
+  raw_text?: string;
+  skills?: string[];
+  experience?: { title?: string; company?: string; duration?: string }[];
+}
+
+function ResumePageContent() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [parsedData, setParsedData] = useState<any | null>(null);
+  const [parsedData, setParsedData] = useState<ParsedResume | null>(null);
   const [existingResumeText, setExistingResumeText] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -25,10 +32,8 @@ export default function ResumePage() {
         if (res.data && res.data.parsed) {
           setExistingResumeText(res.data.raw_text);
         }
-      } catch (err) {
-        // No existing resume
-      } finally {
-        setLoading(false);
+      } catch {
+        setError("Could not load your saved resume. Refresh the page to try again.");
       }
     };
     fetchExisting();
@@ -59,6 +64,7 @@ export default function ResumePage() {
 
     setUploading(true);
     setError(null);
+    setSyncWarning(null);
     
     const formData = new FormData();
     formData.append("file", file);
@@ -72,24 +78,26 @@ export default function ResumePage() {
       
       setSuccess(true);
       setParsedData(data);
+      setExistingResumeText(data.raw_text ?? null);
       
       // Auto-sync profile with resume data
       try {
         await api.post(`/api/profile/sync-from-resume`);
       } catch (syncErr) {
         console.error("Profile sync failed", syncErr);
+        setSyncWarning("Your resume was saved, but your profile could not be synced. You can update it on the Profile page.");
       }
       
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.response?.data?.detail || "Failed to upload and parse resume");
+      setError(apiErrorMessage(err, "Failed to upload and parse resume"));
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
@@ -178,10 +186,12 @@ export default function ResumePage() {
             {success && (
               <div className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3">
                 <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-                <p className="text-sm text-emerald-300">Resume successfully parsed and skills extracted. Your profile has been updated!</p>
+                <p className="text-sm text-emerald-300">Resume successfully parsed and skills extracted.</p>
               </div>
             )}
           </div>
+
+          {syncWarning && <p role="status" className="mb-6 text-sm text-amber-300">{syncWarning}</p>}
 
           {parsedData && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -202,7 +212,7 @@ export default function ResumePage() {
                 <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5">
                   <h3 className="text-sm font-medium text-zinc-400 mb-3 uppercase tracking-wider">Experience</h3>
                   <div className="space-y-4">
-                    {parsedData.experience?.map((exp: any, i: number) => (
+                    {parsedData.experience?.map((exp, i: number) => (
                       <div key={i} className="border-l-2 border-zinc-800 pl-3">
                         <p className="font-medium text-sm text-zinc-200">{exp.title}</p>
                         <p className="text-xs text-zinc-500">{exp.company} • {exp.duration}</p>
@@ -216,11 +226,15 @@ export default function ResumePage() {
 
           {/* AI Resume Improver */}
           {(parsedData?.raw_text || existingResumeText) && (
-            <ResumeImprover resumeText={parsedData?.raw_text || existingResumeText} />
+            <ResumeImprover key={parsedData?.raw_text || existingResumeText} resumeText={(parsedData?.raw_text || existingResumeText)!} />
           )}
 
         </main>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function ResumePage() {
+  return <AuthGuard><ResumePageContent /></AuthGuard>;
 }

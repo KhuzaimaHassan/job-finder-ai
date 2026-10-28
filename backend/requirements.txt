@@ -10,3 +10,4 @@ google-generativeai==0.8.5
 numpy==1.26.4
 python-multipart==0.0.20
 slowapi==0.1.9
+pdfplumber==0.11.9

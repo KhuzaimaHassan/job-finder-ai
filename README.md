@@ -168,6 +168,55 @@ npm run dev
 ```
 *Web App available at: `http://localhost:3000`*
 
+### Reliability and local verification
+
+PDF extraction uses the pinned `pdfplumber` dependency in the backend requirements.
+Resumes must contain selectable text; image-only/scanned PDFs need OCR before upload.
+Uploading a replacement preserves earlier successfully saved resume versions and uses
+a separate storage object, so a failed save cannot delete the previous resume.
+
+Job search only includes database rows observed within `JOB_CACHE_MAX_AGE_DAYS`
+(default 14). Fresh provider results update existing IDs and their observation times.
+Older rows are retained for historical tracker links and displayed as archived, with
+the Apply link disabled. A provider failure does not renew the age of its cached rows.
+The cloud scheduler does not refresh Indeed/LinkedIn through JobSpy: the optional
+local scraper must be run separately on a suitable machine. JSearch remains disabled
+until its quota and operating budget are deliberately reviewed.
+
+Matching uses `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`). It ranks at
+most `MATCH_CANDIDATE_LIMIT` keyword-shortlisted candidates semantically per request,
+using async batched requests, content-aware caches, and a bounded timeout. If the
+provider fails, the response consistently uses keyword scores and labels them in the UI.
+
+Run the backend regression suite without cloud writes:
+
+```bash
+cd backend
+python -m unittest tests.test_reliability -v
+```
+
+For browser regression checks, `tests.browser_app` is a **local-only fixture**, with
+disposable in-memory storage and simulated authentication/AI. Never deploy it.
+It exercises the real application routers, PDF extraction, and frontend flows:
+
+```bash
+# Terminal 1, from backend/ (bind loopback only)
+python -m uvicorn tests.browser_app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2, from frontend/: set these process environment variables first
+# NEXT_PUBLIC_API_URL=http://localhost:8000
+# NEXT_PUBLIC_SUPABASE_URL=http://localhost:8000
+# NEXT_PUBLIC_SUPABASE_ANON_KEY=local-disposable-anon
+npm run build
+npm start
+```
+
+Open `http://localhost:3000`; Continue with Google uses the local fixture instead of
+a real Google account. `http://localhost:8000/_test/resume.pdf` supplies a synthetic
+resume for upload checks. Restart the fixture to discard its data. For a real deployment,
+rebuild using the real frontend environment values: Next.js embeds these public values
+at build time. Production must continue using `app.main:app` as its backend entrypoint.
+
 ---
 
 ## 🚢 Deployment Strategy

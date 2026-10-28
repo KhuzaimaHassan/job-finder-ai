@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Loader2, Save, CheckCircle } from "lucide-react";
 
-export default function ProfilePage() {
+function ProfilePageContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -92,19 +92,19 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <AuthGuard>
+      <>
         <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
           <Navbar />
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
           </div>
         </div>
-      </AuthGuard>
+      </>
     );
   }
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
@@ -216,6 +216,10 @@ export default function ProfilePage() {
           </div>
         </main>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function ProfilePage() {
+  return <AuthGuard><ProfilePageContent /></AuthGuard>;
 }

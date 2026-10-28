@@ -5,10 +5,12 @@ Resume upload, parsing, and retrieval endpoints.
 """
 
 import logging
+import asyncio
+from uuid import uuid4
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.services.auth import get_current_user
-from app.services.supabase_client import get_supabase, get_user_supabase
+from app.services.supabase_client import get_user_supabase
 from app.services.resume_parser import extract_text_from_pdf, parse_resume_with_gemini
 from app.services.embeddings import clear_user_embedding
 
@@ -48,7 +50,7 @@ async def upload_and_parse_resume(
 
     # Step 1: Extract text
     try:
-        raw_text = extract_text_from_pdf(file_bytes)
+        raw_text = await asyncio.to_thread(extract_text_from_pdf, file_bytes)
     except ValueError as e:
         logger.error(f"Text extraction failed: {e}")
         raise HTTPException(status_code=400, detail="Could not extract text from PDF")
@@ -74,22 +76,17 @@ async def upload_and_parse_resume(
     supabase = get_user_supabase(user["token"])
 
     # Upload PDF to Supabase Storage
-    file_path = f"{user['id']}/{file.filename}"
+    # Never overwrite the PDF belonging to the previous successfully saved row.
+    file_path = f"{user['id']}/{uuid4()}.pdf"
     try:
-        supabase.storage.from_("resumes").upload(
-            file_path,
-            file_bytes,
-            file_options={"content-type": "application/pdf", "upsert": "true"},
+        await asyncio.to_thread(
+            supabase.storage.from_("resumes").upload,
+            file_path, file_bytes,
+            file_options={"content-type": "application/pdf"},
         )
     except Exception as e:
         logger.warning(f"Storage upload failed (non-critical): {e}")
         file_path = ""
-
-    # Delete old resumes for this user, then insert new
-    try:
-        supabase.table("resumes").delete().eq("user_id", user["id"]).execute()
-    except Exception:
-        pass
 
     resume_record = {
         "user_id": user["id"],
@@ -103,9 +100,16 @@ async def upload_and_parse_resume(
     }
 
     try:
-        supabase.table("resumes").insert(resume_record).execute()
+        # Keep previous versions intact. Readers already select the newest row.
+        # An insert failure therefore cannot destroy the last good resume.
+        await asyncio.to_thread(supabase.table("resumes").insert(resume_record).execute)
     except Exception as e:
         logger.error(f"Failed to save resume to DB: {e}")
+        if file_path:
+            try:
+                await asyncio.to_thread(supabase.storage.from_("resumes").remove, [file_path])
+            except Exception:
+                logger.warning("Could not remove unsaved resume PDF", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save parsed resume")
 
     # Clear cached embedding so it regenerates with new resume
@@ -113,6 +117,7 @@ async def upload_and_parse_resume(
 
     return {
         "message": "Resume parsed successfully",
+        "raw_text": resume_record["raw_text"],
         "skills": parsed.get("skills", []),
         "education": parsed.get("education", []),
         "experience": parsed.get("experience", []),

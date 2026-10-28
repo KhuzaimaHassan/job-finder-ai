@@ -25,6 +25,7 @@ import logging
 import re
 import math
 import hashlib
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from app.config import settings
 from app.schemas.jobs import Job
@@ -74,6 +75,22 @@ def _clean_description(html: str) -> str:
 # In-memory job store (dict keyed by job id)
 # ---------------------------------------------------------------------------
 _job_store: dict[str, Job] = {}
+
+
+def _normalized_date(value) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    return str(value)
+
+
+def _job_from_row(row: dict) -> Job:
+    payload = {key: row[key] for key in Job.model_fields if key in row}
+    payload["tags"] = row.get("tags") or []
+    posted = row.get("posted_date")
+    payload["posted_date"] = None if str(posted).lower() in ("none", "nan", "") else str(posted)
+    return Job(**payload)
 
 KNOWN_TAGS = [
     "Python", "Machine Learning", "Data Science", "AI", "Deep Learning",
@@ -582,10 +599,10 @@ async def fetch_himalayas_jobs(
     limit: int = 20,
 ) -> List[Job]:
     """Fetch jobs from Himalayas.app public API (no auth required)."""
-    url = "https://himalayas.app/jobs/api"
-    params = {"limit": limit}
+    url = "https://himalayas.app/jobs/api/search" if search else "https://himalayas.app/jobs/api"
+    params = {"page": 1} if search else {"limit": min(limit, 20)}
     if search:
-        params["search"] = search
+        params["q"] = search
 
     try:
         async with httpx.AsyncClient() as client:
@@ -593,58 +610,12 @@ async def fetch_himalayas_jobs(
             resp.raise_for_status()
             data = resp.json()
 
-        relevant_keywords = {
-            "python", "data", "machine learning", "ml", "ai",
-            "data science", "fastapi", "scikit", "analytics",
-            "deep learning", "nlp", "tensorflow", "pytorch",
-            "software", "backend", "full stack", "developer",
-            "engineer", "devops", "cloud",
-        }
-
         jobs: List[Job] = []
-        for item in data.get("jobs", []):
-            title = (item.get("title") or "").strip()
-            if not title:
-                continue
-
-            company = (item.get("companyName") or item.get("company_name") or "Unknown").strip()
-            desc = _clean_description(item.get("description") or "")[:10000]
-
-            # Himalayas is a curated remote tech board — no keyword gating needed.
-            # All results from a targeted search query are already relevant.
-            combined = f"{title} {desc[:500]}".lower()
-
-            # Location
-            locations = item.get("locationRestrictions") or []
-            if isinstance(locations, list) and locations:
-                location = ", ".join(locations[:3])
-            else:
-                location = "Remote"
-
-            apply_url = item.get("applicationLink") or item.get("url") or ""
-            posted = item.get("pubDate") or item.get("publication_date") or ""
-
-            tags_raw = item.get("tags") or []
-            if isinstance(tags_raw, str):
-                tags_raw = [t.strip() for t in tags_raw.split(",")]
-
-            job_id = f"himalayas_{item.get('id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}"
-
-            jobs.append(
-                Job(
-                    id=job_id,
-                    title=title,
-                    company=company,
-                    location=location,
-                    salary=item.get("salary") or None,
-                    description=desc,
-                    url=apply_url,
-                    source="himalayas",
-                    posted_date=posted[:10] if posted else "",
-                    tags=(tags_raw[:10] if tags_raw else _extract_tags(combined)),
-                    job_type="remote",
-                )
-            )
+        for item in data.get("jobs", [])[:limit]:
+            try:
+                jobs.append(_parse_himalayas_job(item))
+            except (ValueError, TypeError, AttributeError, KeyError, OverflowError, OSError) as exc:
+                logger.debug("Skipping invalid/expired Himalayas record: %s", exc)
         logger.info(f"Himalayas ({search}): fetched {len(jobs)} relevant jobs")
         return jobs
 
@@ -652,6 +623,54 @@ async def fetch_himalayas_jobs(
         logger.error(f"Himalayas API error: {e}")
         return []
 
+
+def _parse_himalayas_job(item: dict) -> Job:
+    expiry = item.get("expiryDate")
+    if expiry and float(expiry) <= datetime.now(timezone.utc).timestamp():
+        raise ValueError("Expired listing")
+    title = (item.get("title") or "").strip()
+    if not title:
+        raise ValueError("Missing title")
+
+    company = (item.get("companyName") or item.get("company_name") or "Unknown").strip()
+    desc = _clean_description(item.get("description") or "")[:10000]
+
+    # Himalayas is a curated remote tech board — no keyword gating needed.
+    # All results from a targeted search query are already relevant.
+    combined = f"{title} {desc[:500]}".lower()
+
+    # Location
+    locations = item.get("locationRestrictions") or []
+    if isinstance(locations, list) and locations:
+        location = ", ".join(locations[:3])
+    else:
+        location = "Remote"
+
+    apply_url = item.get("applicationLink") or item.get("url") or ""
+    posted = item.get("pubDate") or item.get("publication_date") or ""
+
+    tags_raw = item.get("tags") or []
+    if isinstance(tags_raw, str):
+        tags_raw = [t.strip() for t in tags_raw.split(",")]
+
+    identity = item.get("guid") or item.get("id") or apply_url or f"{title}|{company}|{location}"
+    job_id = "himalayas_" + hashlib.sha256(str(identity).encode()).hexdigest()[:24]
+    salary = _format_salary(item.get("minSalary"), item.get("maxSalary"), f"{item.get('currency') or 'USD'} ")
+    if salary and item.get("salaryPeriod"):
+        salary += f" / {item['salaryPeriod']}"
+    return Job(
+        id=job_id,
+        title=title,
+        company=company,
+        location=location,
+        salary=salary,
+        description=desc,
+        url=apply_url,
+        source="himalayas",
+        posted_date=_normalized_date(posted),
+        tags=(tags_raw[:10] if tags_raw else _extract_tags(combined)),
+        job_type="remote",
+    )
 
 # ===========================================================================
 # JOBICY CLIENT (free, no key needed)
@@ -741,6 +760,10 @@ async def fetch_jobs_from_supabase() -> List[Job]:
     Called on startup so production backend has data immediately,
     even before the API fetch cycle completes.
     """
+    return await asyncio.to_thread(_load_persisted_jobs)
+
+
+def _load_persisted_jobs() -> List[Job]:
     client = _get_supabase_client()
     if not client:
         logger.warning("Supabase not configured — skipping DB load")
@@ -749,12 +772,14 @@ async def fetch_jobs_from_supabase() -> List[Job]:
     try:
         # Fetch in batches (Supabase default limit is 1000)
         all_rows = []
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.JOB_CACHE_MAX_AGE_DAYS)).isoformat()
         batch_size = 1000
         offset = 0
         while True:
             result = (
                 client.table("jobs")
                 .select("*")
+                .gte("fetched_at", cutoff)
                 .order("fetched_at", desc=True)
                 .range(offset, offset + batch_size - 1)
                 .execute()
@@ -768,19 +793,9 @@ async def fetch_jobs_from_supabase() -> List[Job]:
         jobs: List[Job] = []
         for row in all_rows:
             try:
-                jobs.append(Job(
-                    id=row["id"],
-                    title=row["title"],
-                    company=row["company"],
-                    location=row.get("location", ""),
-                    salary=row.get("salary"),
-                    description=row.get("description", ""),
-                    url=row.get("url", ""),
-                    source=row.get("source", "supabase"),
-                    posted_date=row.get("posted_date") if row.get("posted_date") and str(row.get("posted_date")).lower() != "nan" else "",
-                    tags=row.get("tags") or [],
-                    job_type=row.get("job_type"),
-                ))
+                job = _job_from_row(row)
+                if _is_relevant_job(job):
+                    jobs.append(job)
             except Exception:
                 continue
 
@@ -797,12 +812,15 @@ async def persist_jobs_to_supabase(jobs: List[Job]) -> None:
     Upsert API-fetched jobs into Supabase so they survive Render restarts
     and are available to local scraper runs.
     """
+    await asyncio.to_thread(_persist_jobs, jobs)
+
+
+def _persist_jobs(jobs: List[Job]) -> None:
     client = _get_supabase_client()
     if not client or not jobs:
         return
 
-    from datetime import datetime
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     batch_size = 200
     total = 0
@@ -842,6 +860,10 @@ async def fetch_all_jobs() -> List[Job]:
 
     # ---- Phase 0: Load persisted jobs from Supabase (instant — no API calls) ----
     supabase_jobs = await fetch_jobs_from_supabase()
+    global _job_store
+    # Publish warm data before waiting for slower external providers.
+    if not _job_store:
+        _job_store = {job.id: job for job in supabase_jobs}
 
     # ---- Phase 1: API sources (fast, concurrent) ----
     api_tasks = [
@@ -940,19 +962,14 @@ async def fetch_all_jobs() -> List[Job]:
             unique_jobs.append(job)
 
     # Update in-memory store
-    global _job_store
     _job_store = {job.id: job for job in unique_jobs}
 
     logger.info(f"=== Total: {len(unique_jobs)} unique jobs cached ===")
 
-    # ---- Phase 5: Persist API results to Supabase (background, non-blocking) ----
-    # Only persist API-sourced jobs (not the ones we already loaded from Supabase)
-    api_only = [j for j in unique_jobs if j.id not in {s.id for s in supabase_jobs}]
-    asyncio.create_task(persist_jobs_to_supabase(api_only))
-
-    # Clear embedding cache to plug memory leak
-    from app.services.embeddings import clear_job_embeddings
-    clear_job_embeddings()
+    # Renew last-seen timestamps for every freshly observed ID, including IDs
+    # already in the database. Never renew rows merely reloaded from the DB.
+    observed = {job.id: job for job in filtered_jobs if job.id in api_ids}
+    await persist_jobs_to_supabase(list(observed.values()))
 
     return unique_jobs
 
@@ -968,6 +985,23 @@ def get_all_jobs() -> List[Job]:
 def get_job_by_id(job_id: str) -> Optional[Job]:
     """Return a single job by ID."""
     return _job_store.get(job_id)
+
+
+async def get_archived_job_by_id(job_id: str) -> Optional[Job]:
+    """Historical tracker links may read archived jobs, excluded from search."""
+    def load():
+        client = _get_supabase_client()
+        if not client:
+            return None
+        result = client.table("jobs").select("*").eq("id", job_id).limit(1).execute()
+        if not result.data:
+            return None
+        return _job_from_row(result.data[0]).model_copy(update={"is_active": False})
+    try:
+        return await asyncio.to_thread(load)
+    except Exception:
+        logger.exception("Could not load archived job")
+        return None
 
 
 def search_jobs(

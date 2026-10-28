@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
+import type { ATSScoreResult } from "@/types";
 import { postAiAtsScore } from "@/lib/api";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
@@ -11,7 +13,7 @@ interface ATSScoreProps {
 
 export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ATSScoreResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleCalculate = async () => {
@@ -25,8 +27,8 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
     try {
       const data = await postAiAtsScore(resumeText, jobDescription);
       setResult(data);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to calculate ATS score");
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, "Failed to calculate ATS score"));
     } finally {
       setLoading(false);
     }
@@ -70,6 +72,8 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
       </div>
     );
   }
+
+  if (!result) return null;
 
   return (
     <div className={`border rounded-xl p-6 ${getScoreBg(result.score)}`}>

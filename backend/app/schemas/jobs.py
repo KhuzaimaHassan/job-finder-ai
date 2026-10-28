@@ -15,6 +15,7 @@ class Job(BaseModel):
     posted_date: Optional[str] = None
     tags: List[str] = []
     job_type: Optional[str] = None  # "remote" | "onsite" | "hybrid"
+    is_active: bool = True
 
 
 class JobSearchResponse(BaseModel):
