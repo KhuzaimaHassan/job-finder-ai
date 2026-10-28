@@ -18,6 +18,10 @@ services:
         value: gemini-2.5-flash
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-001
+      - key: JOB_POSTED_MAX_AGE_DAYS
+        value: "30"
+      - key: JOB_PROVIDER_MAX_PAGES
+        value: "5"
       - key: JOB_CACHE_MAX_AGE_DAYS
         value: "14"
       - key: FRONTEND_URL

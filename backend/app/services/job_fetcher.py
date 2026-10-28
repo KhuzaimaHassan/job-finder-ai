@@ -1,1088 +1,167 @@
-"""
-Job Fetcher Service
--------------------
-Fetches jobs from 7 sources, normalizes them, deduplicates, filters, and caches.
-
-Sources:
-  1. Adzuna API (international, needs key)
-  2. RemoteOK API (remote jobs, no key needed)
-  3. Remotive API (remote jobs, no key needed)
-  4. Himalayas.app API (remote jobs, no key needed)
-  5. Jobicy API (remote jobs, no key needed)
-  6. JobSpy / Indeed+Glassdoor (Pakistan local jobs, no key needed)
-  7. JSearch / RapidAPI (Pakistan jobs, free 200 req/mo)
-
-Location Filter:
-  After fetching, jobs are filtered to keep only:
-  - Remote jobs (from any country)
-  - Pakistan onsite/hybrid jobs
-  All other onsite jobs (India, Brazil, etc.) are removed.
-"""
-
-import httpx
+"""Shared job snapshot, persistence and query policy. Providers live in job_sources."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 import re
-import math
-import hashlib
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from urllib.parse import urlsplit
+
 from app.config import settings
 from app.schemas.jobs import Job
 from app.services.job_normalization import contains_skill
-
-try:
-    from supabase import create_client as _sb_create
-    _sb_available = True
-except ImportError:
-    _sb_available = False
+from app.services.job_policy import searchable, parse_date, query_score, relevant_role
+from app.services.job_sources import (fetch_adzuna_jobs, fetch_remoteok_jobs, fetch_remotive_jobs,
+    fetch_himalayas_jobs, fetch_jobicy_jobs, _parse_himalayas_job)
 
 logger = logging.getLogger(__name__)
+_job_store: dict[str, Job] = {}
+_cache_loaded = False
+_refresh_finished = False
+_load_lock = asyncio.Lock()
+
+KNOWN_TAGS = ['Python', 'Machine Learning', 'Data Science', 'AI', 'Deep Learning', 'TensorFlow', 'PyTorch', 'Scikit-learn', 'NLP', 'Computer Vision', 'SQL', 'Pandas', 'NumPy', 'FastAPI', 'Django', 'Flask', 'Docker', 'AWS', 'GCP', 'Azure', 'React', 'Node.js', 'JavaScript', 'TypeScript', 'Spark', 'Airflow', 'Power BI', 'Tableau', 'R', 'HuggingFace', 'LLM', 'GPT', 'Transformer', 'Statistics', 'MLOps', 'ETL', 'Data Engineering', 'Streamlit', 'Kubernetes', 'Java', 'Go', 'Rust', 'C++']
+PAKISTAN_LOCATIONS = {'sargodha', 'lahore', 'abbottabad', 'mardan', 'bahawalpur', 'faisalabad', 'islamabad', 'sialkot', 'hyderabad, pakistan', 'peshawar', 'pakistan', 'rawalpindi', 'karachi', 'multan', 'gujranwala', 'quetta'}
 
 
 def _get_supabase_client():
-    """Return a Supabase client using the service role key (write access)."""
-    if not _sb_available:
-        return None
-    url = settings.SUPABASE_URL
-    key = settings.SUPABASE_SERVICE_KEY or settings.SUPABASE_KEY
-    if not url or not key:
-        return None
-    try:
-        return _sb_create(url, key)
-    except Exception as e:
-        logger.warning(f"Supabase client init failed: {e}")
-        return None
+    from app.services.supabase_client import get_supabase
+    return get_supabase()
 
 
-def _clean_description(html: str) -> str:
-    """
-    Clean job description HTML:
-    - Remove empty/whitespace-only <p> tags (e.g. <p>&nbsp;</p>, <p> </p>)
-    - Collapse 3+ consecutive <br> into 2
-    - Trim excessive leading/trailing whitespace inside tags
-    """
-    if not html:
-        return html
-    # Remove empty paragraphs (with only whitespace or &nbsp;)
-    html = re.sub(r'<p\b[^>]*>\s*(&nbsp;|\s)*\s*</p>', '', html, flags=re.IGNORECASE)
-    # Collapse 3+ consecutive <br> tags into a single one
-    html = re.sub(r'(<br\s*/?>[\s]*){3,}', '<br/><br/>', html, flags=re.IGNORECASE)
-    # Remove empty <li> items
-    html = re.sub(r'<li\b[^>]*>\s*(&nbsp;|\s)*\s*</li>', '', html, flags=re.IGNORECASE)
-    return html.strip()
-
-# ---------------------------------------------------------------------------
-# In-memory job store (dict keyed by job id)
-# ---------------------------------------------------------------------------
-_job_store: dict[str, Job] = {}
-
-
-def _normalized_date(value) -> Optional[str]:
-    if value is None or value == "":
-        return None
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, timezone.utc).isoformat()
-    return str(value)
-
-
-def _job_from_row(row: dict) -> Job:
-    payload = {key: row[key] for key in Job.model_fields if key in row}
-    payload["tags"] = row.get("tags") or []
-    posted = row.get("posted_date")
-    payload["posted_date"] = None if str(posted).lower() in ("none", "nan", "") else str(posted)
-    # Rebuild technical tags from the posting; older rows used substring tags.
-    payload["tags"] = _extract_tags(f"{row.get('title', '')} {row.get('description', '')}")
-    return Job(**payload)
-
-KNOWN_TAGS = [
-    "Python", "Machine Learning", "Data Science", "AI", "Deep Learning",
-    "TensorFlow", "PyTorch", "Scikit-learn", "NLP", "Computer Vision",
-    "SQL", "Pandas", "NumPy", "FastAPI", "Django", "Flask",
-    "Docker", "AWS", "GCP", "Azure", "React", "Node.js",
-    "JavaScript", "TypeScript", "Spark", "Airflow", "Power BI",
-    "Tableau", "R", "HuggingFace", "LLM", "GPT", "Transformer",
-    "Statistics", "MLOps", "ETL", "Data Engineering", "Streamlit",
-    "Kubernetes", "Java", "Go", "Rust", "C++",
-]
-
-# ---------------------------------------------------------------------------
-# Pakistan location filter constants
-# ---------------------------------------------------------------------------
-PAKISTAN_LOCATIONS = {
-    "pakistan", "karachi", "lahore", "islamabad", "rawalpindi", "peshawar",
-    "faisalabad", "multan", "hyderabad, pakistan", "quetta", "sialkot",
-    "gujranwala", "abbottabad", "mardan", "bahawalpur", "sargodha",
-}
-
-# Locations that indicate a NON-Pakistan onsite job (to be filtered out)
-ONSITE_EXCLUSION_MARKERS = {
-    # India cities
-    "mumbai", "delhi", "new delhi", "bangalore", "bengaluru", "chennai",
-    "pune", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad",
-    "jaipur", "chandigarh", "thiruvananthapuram", "lucknow",
-    # India general
-    "india",
-    # LATAM
-    "brazil", "argentina", "mexico", "colombia", "chile", "peru",
-    "são paulo", "sao paulo", "rio de janeiro", "buenos aires",
-    # Africa
-    "nigeria", "south africa", "kenya", "lagos", "cape town",
-    # East/SE Asia
-    "japan", "tokyo", "china", "beijing", "shanghai", "korea", "seoul",
-    "singapore", "philippines", "manila", "vietnam",
-    # Europe (onsite-specific)
-    "germany", "berlin", "munich", "france", "paris", "spain", "madrid",
-    "barcelona", "italy", "milan", "rome", "netherlands", "amsterdam",
-    "portugal", "lisbon",
-}
-
-# Terms that indicate a job is open globally / to anyone
-GLOBAL_LOCATION_MARKERS = {
-    "worldwide", "anywhere", "global", "earth", "remote",
-    "work from home", "work from anywhere", "wfh",
-}
-
-
-def _is_relevant_job(job: 'Job') -> bool:
-    """
-    Filter jobs to keep only:
-    - Remote jobs (from any country)
-    - Pakistan onsite/hybrid jobs
-    - Jobs with worldwide/anywhere location
-    Remove:
-    - India onsite jobs
-    - Other countries' onsite jobs
-    """
-    loc_lower = job.location.lower().strip()
-    job_type_lower = (job.job_type or "").lower()
-
-    # 1. Remote jobs → always keep
-    if job_type_lower == "remote":
-        return True
-    if job_type_lower not in ("onsite", "hybrid") and any(marker in loc_lower for marker in GLOBAL_LOCATION_MARKERS):
-        return True
-
-    # 2. Pakistan jobs → always keep
-    if any(pk_loc in loc_lower for pk_loc in PAKISTAN_LOCATIONS):
-        return True
-
-    # 3. Onsite job in a known non-Pakistan location → remove
-    if any(excl in loc_lower for excl in ONSITE_EXCLUSION_MARKERS):
-        return False
-
-    # 4. If location is empty or ambiguous, keep it (benefit of the doubt)
-    if not loc_lower or loc_lower in ("", "n/a", "not specified"):
-        return True
-
-    # 5. For any other onsite job with a specific location that isn't Pakistan → remove
-    #    But if job_type is not explicitly "onsite", keep it (could be remote-friendly)
-    if job_type_lower == "onsite":
-        return False
-
-    # Default: keep (unclassified jobs get benefit of the doubt)
-    return True
-
-
-def _extract_tags(text: str) -> List[str]:
-    """Extract relevant technology tags from text."""
+def _extract_tags(text):
     return [tag for tag in KNOWN_TAGS if contains_skill(text, tag)][:10]
 
 
-def _format_salary(min_val, max_val, currency: str = "$") -> Optional[str]:
-    """Format a min/max salary range into a readable string."""
-    try:
-        if min_val and max_val:
-            return f"{currency}{int(float(min_val)):,} - {currency}{int(float(max_val)):,}"
-        elif min_val:
-            return f"{currency}{int(float(min_val)):,}+"
-        elif max_val:
-            return f"Up to {currency}{int(float(max_val)):,}"
-    except (ValueError, TypeError):
-        pass
-    return None
+def _job_from_row(row):
+    payload = {key: row[key] for key in Job.model_fields if key in row}
+    for key in ("tags", "location_restrictions", "timezone_restrictions"):
+        payload[key] = payload.get(key) or []
+    payload["posted_date"] = parse_date(row.get("posted_date")).isoformat() if parse_date(row.get("posted_date")) else None
+    payload["tags"] = _extract_tags(f"{row.get('title', '')} {row.get('description', '')}")
+    return Job(**payload)
 
 
-# ===========================================================================
-# ADZUNA CLIENT
-# ===========================================================================
-async def fetch_adzuna_jobs(
-    query: str = "data science",
-    country: str = "gb",
-    page: int = 1,
-    results_per_page: int = 50,
-) -> List[Job]:
-    """Fetch jobs from Adzuna API. Requires ADZUNA_APP_ID and ADZUNA_APP_KEY."""
-    if not settings.ADZUNA_APP_ID or not settings.ADZUNA_APP_KEY:
-        logger.warning("Adzuna API credentials not configured - skipping")
-        return []
+def _is_relevant_job(job):
+    if not relevant_role(job):
+        return False
+    return job.job_type == "remote" or (not job.job_type and job.location.lower() in ("remote", "worldwide", "anywhere")) or any(place in job.location.lower() for place in PAKISTAN_LOCATIONS)
 
-    url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
-    params = {
-        "app_id": settings.ADZUNA_APP_ID,
-        "app_key": settings.ADZUNA_APP_KEY,
-        "what": query,
-        "results_per_page": results_per_page,
-        "content-type": "application/json",
-    }
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        jobs: List[Job] = []
-        for item in data.get("results", []):
-            combined_text = f"{item.get('title', '')} {item.get('description', '')}"
-            location = item.get("location", {}).get("display_name", "")
-            jobs.append(
-                Job(
-                    id=f"adzuna_{item.get('id', '')}",
-                    title=item.get("title", "").strip(),
-                    company=item.get("company", {}).get("display_name", "Unknown"),
-                    location=location,
-                    salary=_format_salary(
-                        item.get("salary_min"), item.get("salary_max")
-                    ),
-                    description=_clean_description(item.get("description", ""))[:10000],
-                    url=item.get("redirect_url", ""),
-                    source="adzuna",
-                    posted_date=item.get("created", ""),
-                    tags=_extract_tags(combined_text),
-                    job_type=(
-                        "remote"
-                        if "remote" in combined_text.lower()
-                        else "onsite"
-                    ),
-                )
-            )
-        logger.info(f"Adzuna ({country}/{query}): fetched {len(jobs)} jobs")
-        return jobs
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Adzuna API HTTP error ({country}): {e.response.status_code}")
-        return []
-    except Exception as e:
-        logger.error(f"Adzuna API error ({country}): {e}")
-        return []
-
-
-# ===========================================================================
-# REMOTEOK CLIENT
-# ===========================================================================
-async def fetch_remoteok_jobs() -> List[Job]:
-    """Fetch jobs from RemoteOK public API (no auth required)."""
-    url = "https://remoteok.com/api"
-    headers = {"User-Agent": "JobFinderApp/1.0 (personal project)"}
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        relevant_keywords = {
-            "python", "data", "machine learning", "ml", "ai",
-            "data science", "fastapi", "scikit", "analytics",
-            "deep learning", "nlp", "tensorflow", "pytorch",
-        }
-
-        jobs: List[Job] = []
-        for item in data[1:]:  # first element is metadata
-            if not isinstance(item, dict) or not item.get("position"):
-                continue
-
-            tags = item.get("tags", [])
-            if isinstance(tags, str):
-                tags = [t.strip() for t in tags.split(",")]
-
-            title_lower = item.get("position", "").lower()
-            tag_set = {t.lower() for t in tags}
-            desc_lower = item.get("description", "")[:500].lower()
-            combined = f"{title_lower} {' '.join(tag_set)} {desc_lower}"
-
-            if not any(kw in combined for kw in relevant_keywords):
-                continue
-
-            slug = item.get("slug", item.get("id", ""))
-            apply_url = item.get("url", "") or f"https://remoteok.com/remote-jobs/{slug}"
-
-            jobs.append(
-                Job(
-                    id=f"remoteok_{item.get('id', '')}",
-                    title=item.get("position", "").strip(),
-                    company=item.get("company", "Unknown").strip(),
-                    location=item.get("location", "Remote") or "Remote",
-                    salary=_format_salary(
-                        item.get("salary_min"), item.get("salary_max")
-                    ),
-                    description=_clean_description(item.get("description", ""))[:10000],
-                    url=apply_url,
-                    source="remoteok",
-                    posted_date=item.get("date", ""),
-                    tags=(tags[:10] if tags else _extract_tags(combined)),
-                    job_type="remote",
-                )
-            )
-        logger.info(f"RemoteOK: fetched {len(jobs)} relevant jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"RemoteOK API error: {e}")
-        return []
-
-
-# ===========================================================================
-# REMOTIVE CLIENT
-# ===========================================================================
-async def fetch_remotive_jobs(
-    category: str = "software-dev",
-    search: str = "",
-    limit: int = 100,
-) -> List[Job]:
-    """Fetch jobs from Remotive public API (no auth required)."""
-    url = "https://remotive.com/api/remote-jobs"
-    params = {"category": category, "limit": limit}
-    if search:
-        params["search"] = search
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        jobs: List[Job] = []
-        for item in data.get("jobs", []):
-            tags = item.get("tags", [])
-            if isinstance(tags, str):
-                tags = [t.strip() for t in tags.split(",")]
-
-            salary = item.get("salary", "")
-            if not salary or salary.strip() == "":
-                salary = None
-
-            desc = _clean_description(item.get("description", ""))[:10000]
-
-            jobs.append(
-                Job(
-                    id=f"remotive_{item.get('id', '')}",
-                    title=item.get("title", "").strip(),
-                    company=item.get("company_name", "Unknown").strip(),
-                    location=item.get("candidate_required_location", "Remote") or "Remote",
-                    salary=salary,
-                    description=desc,
-                    url=item.get("url", ""),
-                    source="remotive",
-                    employment_type=item.get("job_type"),
-                    posted_date=item.get("publication_date", ""),
-                    tags=(tags[:10] if tags else _extract_tags(desc)),
-                    job_type="remote",
-                )
-            )
-        logger.info(f"Remotive ({category}/{search}): fetched {len(jobs)} jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"Remotive API error: {e}")
-        return []
-
-
-# ===========================================================================
-# JOBSPY CLIENT - Indeed + Google Jobs for Pakistan cities (NO API KEY NEEDED)
-# ===========================================================================
-async def fetch_jobspy_pakistan_jobs() -> List[Job]:
-    """
-    Use python-jobspy to scrape Indeed and Google Jobs for Pakistan cities.
-    Runs in a thread pool since jobspy is synchronous.
-    No API key required - this is the PRIMARY source for Pakistan jobs.
-    """
-    try:
-        from jobspy import scrape_jobs as jobspy_scrape
-    except ImportError:
-        logger.warning("python-jobspy not installed - pip install python-jobspy")
-        return []
-
-    pakistan_searches = [
-        {"term": "data science", "location": "Karachi", "country": "Pakistan"},
-        {"term": "python developer", "location": "Karachi", "country": "Pakistan"},
-        {"term": "machine learning", "location": "Karachi", "country": "Pakistan"},
-        {"term": "software engineer", "location": "Karachi", "country": "Pakistan"},
-        {"term": "data analyst", "location": "Karachi", "country": "Pakistan"},
-        {"term": "AI engineer", "location": "Karachi", "country": "Pakistan"},
-        {"term": "data science", "location": "Lahore", "country": "Pakistan"},
-        {"term": "python developer", "location": "Lahore", "country": "Pakistan"},
-        {"term": "software engineer", "location": "Lahore", "country": "Pakistan"},
-        {"term": "data science", "location": "Islamabad", "country": "Pakistan"},
-        {"term": "python developer", "location": "Islamabad", "country": "Pakistan"},
-        {"term": "software engineer", "location": "Islamabad", "country": "Pakistan"},
-    ]
-
-    def _scrape_one(search: dict) -> List[Job]:
-        try:
-            df = jobspy_scrape(
-                site_name=["indeed", "google"],
-                search_term=search["term"],
-                location=search["location"],
-                results_wanted=15,
-                country_indeed=search["country"],
-            )
-            jobs_list: List[Job] = []
-            for _, row in df.iterrows():
-                title = str(row.get("title", "")).strip()
-                if not title or title == "nan":
-                    continue
-
-                company = str(row.get("company_name", row.get("company", "Unknown"))).strip()
-                if company == "nan":
-                    company = "Unknown"
-
-                loc = str(row.get("location", "")).strip()
-                if not loc or loc == "nan":
-                    loc = f"{search['location']}, Pakistan"
-                elif "pakistan" not in loc.lower():
-                    loc = f"{loc}, Pakistan"
-
-                # Salary
-                salary = None
-                sal_min = row.get("min_amount", None)
-                sal_max = row.get("max_amount", None)
-                if sal_min is not None and not (isinstance(sal_min, float) and math.isnan(sal_min)):
-                    currency = str(row.get("currency", "PKR"))
-                    if currency == "nan":
-                        currency = "PKR"
-                    salary = _format_salary(sal_min, sal_max, f"{currency} ")
-
-                # Description
-                desc = str(row.get("description", ""))[:2000]
-                if desc == "nan":
-                    desc = ""
-
-                # URL
-                url = str(row.get("job_url", row.get("link", "")))
-                if url == "nan":
-                    url = ""
-
-                posted = row.get("date_posted", None)
-                posted_str = ""
-                if posted is not None and str(posted).lower() not in ("nan", "nat", "none"):
-                    try:
-                        posted_str = str(posted)[:10]
-                    except Exception:
-                        pass
-
-                site = str(row.get("site", "indeed")).lower()
-                source_name = "indeed" if "indeed" in site else "google"
-
-                id_hash = hashlib.md5(f'{title}{company}{loc}'.encode()).hexdigest()[:12]
-                job_id = f"{source_name}_{id_hash}"
-                combined = f"{title} {desc}"
-
-                jobs_list.append(
-                    Job(
-                        id=job_id,
-                        title=title,
-                        company=company,
-                        location=loc,
-                        salary=salary,
-                        description=desc,
-                        url=url,
-                        source=source_name,
-                        posted_date=posted_str,
-                        tags=_extract_tags(combined),
-                        job_type="remote" if "remote" in combined.lower() else "onsite",
-                    )
-                )
-            return jobs_list
-        except Exception as e:
-            logger.error(f"JobSpy scrape error ({search['term']} in {search['location']}): {e}")
-            return []
-
-    # Run searches in thread pool (jobspy is synchronous)
-    loop = asyncio.get_event_loop()
-    all_jobs: List[Job] = []
-
-    for search in pakistan_searches:
-        try:
-            jobs = await loop.run_in_executor(None, _scrape_one, search)
-            all_jobs.extend(jobs)
-            logger.info(f"JobSpy ({search['term']} in {search['location']}): {len(jobs)} jobs")
-            # Small delay between scrapes to be respectful
-            await asyncio.sleep(2)
-        except Exception as e:
-            logger.error(f"JobSpy executor error: {e}")
-
-    logger.info(f"JobSpy Pakistan total: {len(all_jobs)} jobs")
-    return all_jobs
-
-
-# ===========================================================================
-# JSEARCH CLIENT - RapidAPI (free 200 req/month)
-# ===========================================================================
-async def fetch_jsearch_jobs(
-    query: str = "data science in Pakistan",
-    page: int = 1,
-) -> List[Job]:
-    """
-    Fetch jobs from JSearch API on RapidAPI.
-    Free tier: 200 requests/month. Set JSEARCH_API_KEY in .env.
-    """
-    if not settings.JSEARCH_API_KEY:
-        logger.warning("JSearch API key not configured - skipping")
-        return []
-
-    url = "https://jsearch.p.rapidapi.com/search"
-    params = {
-        "query": query,
-        "page": str(page),
-        "num_pages": "1",
-        "country": "pk",
-    }
-    headers = {
-        "x-rapidapi-key": settings.JSEARCH_API_KEY,
-        "x-rapidapi-host": "jsearch.p.rapidapi.com",
-    }
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, headers=headers, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        jobs: List[Job] = []
-        for item in data.get("data", []):
-            title = item.get("job_title", "").strip()
-            company = item.get("employer_name", "Unknown").strip()
-            city = item.get("job_city", "")
-            state = item.get("job_state", "")
-            country = item.get("job_country", "Pakistan")
-            loc_parts = [p for p in [city, state, country] if p]
-            location = ", ".join(loc_parts) or "Pakistan"
-
-            desc = item.get("job_description", "")[:2000]
-            apply_url = item.get("job_apply_link", "")
-            posted = item.get("job_posted_at_datetime_utc", "")
-
-            sal_min = item.get("job_min_salary")
-            sal_max = item.get("job_max_salary")
-            currency = item.get("job_salary_currency", "PKR")
-            salary = _format_salary(sal_min, sal_max, f"{currency} ") if sal_min or sal_max else None
-
-            is_remote = item.get("job_is_remote", False)
-
-            jobs.append(
-                Job(
-                    id=f"jsearch_{item.get('job_id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}",
-                    title=title,
-                    company=company,
-                    location=location,
-                    salary=salary,
-                    description=desc,
-                    url=apply_url,
-                    source="jsearch",
-                    posted_date=posted[:10] if posted else "",
-                    tags=_extract_tags(f"{title} {desc}"),
-                    job_type="remote" if is_remote else "onsite",
-                )
-            )
-        logger.info(f"JSearch ({query}): fetched {len(jobs)} jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"JSearch API error: {e}")
-        return []
-
-
-# ===========================================================================
-# HIMALAYAS.APP CLIENT (free, no key needed)
-# ===========================================================================
-async def fetch_himalayas_jobs(
-    search: str = "python",
-    limit: int = 20,
-) -> List[Job]:
-    """Fetch jobs from Himalayas.app public API (no auth required)."""
-    url = "https://himalayas.app/jobs/api/search" if search else "https://himalayas.app/jobs/api"
-    params = {"page": 1} if search else {"limit": min(limit, 20)}
-    if search:
-        params["q"] = search
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        jobs: List[Job] = []
-        for item in data.get("jobs", [])[:limit]:
-            try:
-                jobs.append(_parse_himalayas_job(item))
-            except (ValueError, TypeError, AttributeError, KeyError, OverflowError, OSError) as exc:
-                logger.debug("Skipping invalid/expired Himalayas record: %s", exc)
-        logger.info(f"Himalayas ({search}): fetched {len(jobs)} relevant jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"Himalayas API error: {e}")
-        return []
-
-
-def _parse_himalayas_job(item: dict) -> Job:
-    expiry = item.get("expiryDate")
-    if expiry and float(expiry) <= datetime.now(timezone.utc).timestamp():
-        raise ValueError("Expired listing")
-    title = (item.get("title") or "").strip()
-    if not title:
-        raise ValueError("Missing title")
-
-    company = (item.get("companyName") or item.get("company_name") or "Unknown").strip()
-    desc = _clean_description(item.get("description") or "")[:10000]
-
-    # Himalayas is a curated remote tech board — no keyword gating needed.
-    # All results from a targeted search query are already relevant.
-    combined = f"{title} {desc[:500]}".lower()
-
-    # Location
-    locations = item.get("locationRestrictions") or []
-    if isinstance(locations, list) and locations:
-        location = ", ".join(locations[:3])
-    else:
-        location = "Remote"
-
-    apply_url = item.get("applicationLink") or item.get("url") or ""
-    posted = item.get("pubDate") or item.get("publication_date") or ""
-
-    tags_raw = item.get("tags") or []
-    if isinstance(tags_raw, str):
-        tags_raw = [t.strip() for t in tags_raw.split(",")]
-
-    identity = item.get("guid") or item.get("id") or apply_url or f"{title}|{company}|{location}"
-    job_id = "himalayas_" + hashlib.sha256(str(identity).encode()).hexdigest()[:24]
-    salary = _format_salary(item.get("minSalary"), item.get("maxSalary"), f"{item.get('currency') or 'USD'} ")
-    if salary and item.get("salaryPeriod"):
-        salary += f" / {item['salaryPeriod']}"
-    return Job(
-        id=job_id,
-        title=title,
-        company=company,
-        location=location,
-        salary=salary,
-        description=desc,
-        url=apply_url,
-        source="himalayas",
-        employment_type=item.get("employmentType"),
-        posted_date=_normalized_date(posted),
-        tags=(tags_raw[:10] if tags_raw else _extract_tags(combined)),
-        job_type="remote",
-    )
-
-# ===========================================================================
-# JOBICY CLIENT (free, no key needed)
-# ===========================================================================
-async def fetch_jobicy_jobs(
-    count: int = 50,
-    tag: str = "",
-) -> List[Job]:
-    """Fetch jobs from Jobicy public API (no auth required)."""
-    url = "https://jobicy.com/api/v2/remote-jobs"
-    params = {"count": count}
-    if tag:
-        params["tag"] = tag
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-
-        relevant_keywords = {
-            "python", "data", "machine learning", "ml", "ai",
-            "data science", "fastapi", "scikit", "analytics",
-            "deep learning", "nlp", "tensorflow", "pytorch",
-            "software", "backend", "full stack", "developer",
-            "engineer", "devops", "cloud",
-        }
-
-        jobs: List[Job] = []
-        for item in data.get("jobs", []):
-            title = (item.get("jobTitle") or "").strip()
-            if not title:
-                continue
-
-            company = (item.get("companyName") or "Unknown").strip()
-            desc_raw = item.get("jobDescription") or item.get("jobExcerpt") or ""
-            desc = _clean_description(desc_raw)[:10000]
-
-            # Relevance check
-            combined = f"{title} {desc[:500]}".lower()
-            if not any(kw in combined for kw in relevant_keywords):
-                continue
-
-            location = item.get("jobGeo") or "Remote"
-            apply_url = item.get("url") or ""
-            posted = item.get("pubDate") or ""
-
-            industry = item.get("jobIndustry") or []
-            if isinstance(industry, list):
-                tags = industry[:5]
-            else:
-                tags = [industry] if industry else []
-            tags.extend(_extract_tags(combined))
-            tags = list(set(tags))[:10]
-
-            job_id = f"jobicy_{item.get('id') or hashlib.md5(f'{title}{company}'.encode()).hexdigest()[:12]}"
-
-            jobs.append(
-                Job(
-                    id=job_id,
-                    title=title,
-                    company=company,
-                    location=location,
-                    salary=None,
-                    description=desc,
-                    url=apply_url,
-                    source="jobicy",
-                    employment_type=" ".join(item.get("jobType") or []) if isinstance(item.get("jobType"), list) else item.get("jobType"),
-                    posted_date=posted[:10] if posted else "",
-                    tags=tags,
-                    job_type="remote",
-                )
-            )
-        logger.info(f"Jobicy ({tag or 'all'}): fetched {len(jobs)} relevant jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"Jobicy API error: {e}")
-        return []
-
-
-# ===========================================================================
-# SUPABASE PERSISTENCE
-# ===========================================================================
-async def fetch_jobs_from_supabase() -> List[Job]:
-    """
-    Load all jobs stored in Supabase into memory.
-    Called on startup so production backend has data immediately,
-    even before the API fetch cycle completes.
-    """
-    return await asyncio.to_thread(_load_persisted_jobs)
-
-
-def _load_persisted_jobs() -> List[Job]:
+def _load_persisted_jobs():
     client = _get_supabase_client()
-    if not client:
-        logger.warning("Supabase not configured — skipping DB load")
-        return []
-
-    try:
-        # Fetch in batches (Supabase default limit is 1000)
-        all_rows = []
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.JOB_CACHE_MAX_AGE_DAYS)).isoformat()
-        batch_size = 1000
-        offset = 0
-        while True:
-            result = (
-                client.table("jobs")
-                .select("*")
-                .gte("fetched_at", cutoff)
-                .order("fetched_at", desc=True)
-                .range(offset, offset + batch_size - 1)
-                .execute()
-            )
-            rows = result.data or []
-            all_rows.extend(rows)
-            if len(rows) < batch_size:
-                break
-            offset += batch_size
-
-        jobs: List[Job] = []
-        for row in all_rows:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.JOB_CACHE_MAX_AGE_DAYS)).isoformat()
+    jobs = []
+    for offset in range(0, 100000, 1000):
+        rows = client.table("jobs").select("*").gte("fetched_at", cutoff).order("id").range(offset, offset + 999).execute().data or []
+        for row in rows:
             try:
                 job = _job_from_row(row)
                 if _is_relevant_job(job):
                     jobs.append(job)
-            except Exception:
-                continue
-
-        logger.info(f"Supabase: loaded {len(jobs)} persisted jobs")
-        return jobs
-
-    except Exception as e:
-        logger.error(f"Supabase load error: {e}")
-        return []
+            except (ValueError, TypeError):
+                logger.warning("Skipped invalid persisted job")
+        if len(rows) < 1000:
+            return jobs
+    raise RuntimeError("Job snapshot load exceeded its safety limit")
 
 
-async def persist_jobs_to_supabase(jobs: List[Job]) -> None:
-    """
-    Upsert API-fetched jobs into Supabase so they survive Render restarts
-    and are available to local scraper runs.
-    """
+async def fetch_jobs_from_supabase():
+    return await asyncio.to_thread(_load_persisted_jobs)
+
+
+def publish_snapshot(jobs):
+    global _job_store, _cache_loaded
+    # Include location and contract in vacancy identity; source IDs remain stored.
+    unique = {}
+    for job in sorted(jobs, key=lambda j: (j.posted_date or "", j.id), reverse=True):
+        key = tuple(re.sub(r"\s+", " ", value.lower()).strip() for value in
+                    (job.title, job.company, job.location, job.employment_type or ""))
+        unique.setdefault(key, job)
+    _job_store = {job.id: job for job in unique.values()}
+    _cache_loaded = True
+
+
+async def reload_snapshot():
+    async with _load_lock:
+        jobs = await fetch_jobs_from_supabase()
+        publish_snapshot(jobs)
+
+
+def cache_ready():
+    return bool(_job_store) or (_cache_loaded and _refresh_finished)
+
+
+def _persist_jobs(jobs):
+    if not jobs:
+        return
+    client = _get_supabase_client()
+    now = datetime.now(timezone.utc).isoformat()
+    for start in range(0, len(jobs), 200):
+        batch = []
+        for job in jobs[start:start + 200]:
+            job.fetched_at = now
+            row = job.model_dump(exclude={"is_active", "first_seen_at"})
+            row["fetched_at"] = now
+            row["description"] = row["description"][:10000]
+            batch.append(row)
+        client.table("jobs").upsert(batch, on_conflict="id").execute()
+
+
+async def persist_jobs_to_supabase(jobs):
     await asyncio.to_thread(_persist_jobs, jobs)
 
 
-def _persist_jobs(jobs: List[Job]) -> None:
-    client = _get_supabase_client()
-    if not client or not jobs:
-        return
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    batch_size = 200
-    total = 0
-    for i in range(0, len(jobs), batch_size):
-        batch = [
-            {
-                "id": j.id,
-                "title": j.title,
-                "company": j.company,
-                "location": j.location,
-                "salary": j.salary,
-                "description": j.description[:8000],  # keep under Supabase limits
-                "url": j.url,
-                "source": j.source,
-                "posted_date": j.posted_date,
-                "tags": j.tags,
-                "job_type": j.job_type,
-                "fetched_at": now,
-            }
-            for j in jobs[i:i + batch_size]
-        ]
-        try:
-            client.table("jobs").upsert(batch, on_conflict="id").execute()
-            total += len(batch)
-        except Exception as e:
-            logger.warning(f"Supabase persist batch failed: {e}")
-
-    logger.info(f"Supabase: persisted {total} jobs")
+async def fetch_all_jobs():
+    from app.services.ingestion import refresh_jobs
+    return await refresh_jobs()
 
 
-# ===========================================================================
-# AGGREGATOR - fetch all, deduplicate, filter, cache
-# ===========================================================================
-async def fetch_all_jobs() -> List[Job]:
-    """Fetch jobs from ALL sources, deduplicate, filter location, and cache."""
-    logger.info("=== Starting full job fetch from all sources ===")
-
-    # ---- Phase 0: Load persisted jobs from Supabase (instant — no API calls) ----
-    supabase_jobs = await fetch_jobs_from_supabase()
-    global _job_store
-    # Publish warm data before waiting for slower external providers.
-    if not _job_store:
-        _job_store = {job.id: job for job in supabase_jobs}
-
-    # ---- Phase 1: API sources (fast, concurrent) ----
-    api_tasks = [
-        # RemoteOK (remote tech/data jobs, no key needed)
-        fetch_remoteok_jobs(),
-
-        # Remotive — expanded categories (no key needed, 100 jobs each)
-        fetch_remotive_jobs(category="software-dev", search="python"),
-        fetch_remotive_jobs(category="software-dev", search="machine learning"),
-        fetch_remotive_jobs(category="software-dev", search="data science"),
-        fetch_remotive_jobs(category="software-dev", search="AI engineer"),
-        fetch_remotive_jobs(category="software-dev", search="backend"),
-        fetch_remotive_jobs(category="software-dev", search="full stack"),
-        fetch_remotive_jobs(category="data"),
-        fetch_remotive_jobs(category="data", search="python"),
-        fetch_remotive_jobs(category="data", search="analytics"),
-        fetch_remotive_jobs(category="devops-sysadmin"),
-        fetch_remotive_jobs(category="product"),
-        fetch_remotive_jobs(category="all", search="python developer"),
-        fetch_remotive_jobs(category="all", search="django fastapi"),
-        fetch_remotive_jobs(category="all", search="deep learning nlp"),
-        fetch_remotive_jobs(category="all", search="MLOps"),
-
-        # Himalayas.app (free, no key needed, remote tech jobs)
-        fetch_himalayas_jobs(search="python"),
-        fetch_himalayas_jobs(search="data science"),
-        fetch_himalayas_jobs(search="machine learning"),
-        fetch_himalayas_jobs(search="AI engineer"),
-        fetch_himalayas_jobs(search="software engineer"),
-
-        # Jobicy (free, no key needed, remote jobs)
-        fetch_jobicy_jobs(count=50, tag="python"),
-        fetch_jobicy_jobs(count=50, tag="data-science"),
-        fetch_jobicy_jobs(count=50, tag="machine-learning"),
-        fetch_jobicy_jobs(count=50),
-
-        # Adzuna (international, requires ADZUNA_APP_ID + ADZUNA_APP_KEY)
-        # NOTE: Pakistan ("pk") is NOT supported by Adzuna — removed.
-        # India queries now include "remote" to avoid onsite-India pollution.
-        fetch_adzuna_jobs(query="data science python remote", country="gb"),
-        fetch_adzuna_jobs(query="machine learning AI remote", country="us"),
-        fetch_adzuna_jobs(query="data science python remote", country="in"),
-
-        # JSearch / RapidAPI (JSEARCH_API_KEY is now set — 200 req/month free)
-        # DISABLED: User has exhausted their 100% quota on RapidAPI
-        # fetch_jsearch_jobs(query="data science jobs in Karachi Pakistan"),
-        # fetch_jsearch_jobs(query="python developer jobs in Karachi Pakistan"),
-        # fetch_jsearch_jobs(query="software engineer jobs in Karachi Pakistan"),
-        # fetch_jsearch_jobs(query="machine learning jobs in Lahore Pakistan"),
-        # fetch_jsearch_jobs(query="data analyst jobs in Lahore Pakistan"),
-        # fetch_jsearch_jobs(query="software engineer jobs in Islamabad Pakistan"),
-        # fetch_jsearch_jobs(query="AI engineer jobs in Pakistan"),
-        # fetch_jsearch_jobs(query="backend developer jobs in Pakistan"),
-    ]
-
-    api_results = await asyncio.gather(*api_tasks, return_exceptions=True)
-
-    all_jobs: List[Job] = []
-    for result in api_results:
-        if isinstance(result, Exception):
-            logger.error(f"API fetch task failed: {result}")
-        elif isinstance(result, list):
-            all_jobs.extend(result)
-
-    # ---- Phase 2: JobSpy scraping — only runs locally, blocked by cloud IPs ----
-    try:
-        pakistan_jobs = await fetch_jobspy_pakistan_jobs()
-        if pakistan_jobs:
-            logger.info(f"JobSpy returned {len(pakistan_jobs)} jobs (local dev only)")
-            all_jobs.extend(pakistan_jobs)
-    except Exception as e:
-        logger.warning(f"JobSpy skipped (expected on cloud): {e}")
-
-    logger.info(f"Raw jobs fetched (before filter): {len(all_jobs)}")
-
-    # ---- Phase 3: Location filter ----
-    # Remove India onsite, other countries' onsite. Keep remote + Pakistan.
-    filtered_jobs = [job for job in all_jobs if _is_relevant_job(job)]
-    removed = len(all_jobs) - len(filtered_jobs)
-    logger.info(f"Location filter: kept {len(filtered_jobs)}, removed {removed} non-relevant onsite jobs")
-
-    # ---- Phase 4: Merge Supabase jobs (already filtered when uploaded) ----
-    # Add Supabase jobs that aren't already in the API results
-    api_ids = {j.id for j in filtered_jobs}
-    new_from_db = [j for j in supabase_jobs if j.id not in api_ids]
-    logger.info(f"Supabase: adding {len(new_from_db)} additional persisted jobs")
-    filtered_jobs.extend(new_from_db)
-
-    # Deduplicate by normalized title + company
-    seen: set[str] = set()
-    unique_jobs: List[Job] = []
-    for job in filtered_jobs:
-        key = f"{job.title.lower().strip()}|{job.company.lower().strip()}"
-        if key not in seen:
-            seen.add(key)
-            unique_jobs.append(job)
-
-    # Update in-memory store
-    _job_store = {job.id: job for job in unique_jobs}
-
-    logger.info(f"=== Total: {len(unique_jobs)} unique jobs cached ===")
-
-    # Renew last-seen timestamps for every freshly observed ID, including IDs
-    # already in the database. Never renew rows merely reloaded from the DB.
-    observed = {job.id: job for job in filtered_jobs if job.id in api_ids}
-    await persist_jobs_to_supabase(list(observed.values()))
-
-    return unique_jobs
+def get_all_jobs():
+    return [job for job in _job_store.values() if searchable(job) and _is_relevant_job(job)]
 
 
-# ===========================================================================
-# STORE ACCESS
-# ===========================================================================
-def get_all_jobs() -> List[Job]:
-    """Return all cached jobs."""
-    return list(_job_store.values())
+def get_job_by_id(job_id):
+    job = _job_store.get(job_id)
+    return job if job and searchable(job) else None
 
 
-def get_job_by_id(job_id: str) -> Optional[Job]:
-    """Return a single job by ID."""
-    return _job_store.get(job_id)
-
-
-async def get_archived_job_by_id(job_id: str) -> Optional[Job]:
-    """Historical tracker links may read archived jobs, excluded from search."""
+async def get_archived_job_by_id(job_id):
     def load():
-        client = _get_supabase_client()
-        if not client:
-            return None
-        result = client.table("jobs").select("*").eq("id", job_id).limit(1).execute()
-        if not result.data:
-            return None
-        return _job_from_row(result.data[0]).model_copy(update={"is_active": False})
+        rows = _get_supabase_client().table("jobs").select("*").eq("id", job_id).limit(1).execute().data
+        return _job_from_row(rows[0]).model_copy(update={"is_active": False}) if rows else None
     try:
         return await asyncio.to_thread(load)
     except Exception:
-        logger.exception("Could not load archived job")
+        logger.exception("Archived job lookup failed")
         return None
 
 
-def search_jobs(
-    q: Optional[str] = None,
-    location: Optional[str] = None,
-    job_type: Optional[str] = None,
-    source: Optional[str] = None,
-    page: int = 1,
-    per_page: int = 20,
-    employment_type: Optional[str] = None,
-) -> tuple[List[Job], int]:
-    """Search and filter the in-memory job cache. Returns (paginated_jobs, total)."""
-    jobs = list(_job_store.values())
-
-    # Text search across title, description, company, tags
-    if q:
-        q_lower = q.lower()
-        jobs = [
-            j
-            for j in jobs
-            if q_lower in j.title.lower()
-            or q_lower in j.description.lower()
-            or q_lower in j.company.lower()
-            or any(q_lower in t.lower() for t in j.tags)
-        ]
-
-    # Location filter
+def search_jobs(q=None, location=None, job_type=None, source=None, page=1, per_page=20, employment_type=None, posted_within_days=None):
+    jobs = get_all_jobs()
+    if posted_within_days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=posted_within_days)
+        jobs = [job for job in jobs if parse_date(job.posted_date) and parse_date(job.posted_date) >= cutoff]
+    if q and q.strip():
+        jobs = [job for job in jobs if query_score(job, q) > 0]
     if location:
         loc = location.lower().strip()
         if loc == "remote":
-            jobs = [
-                j for j in jobs
-                if j.job_type == "remote" or (j.job_type not in ("onsite", "hybrid") and "remote" in j.location.lower())
-            ]
+            jobs = [job for job in jobs if job.job_type == "remote"]
         elif loc in ("pakistan", "pk"):
-            # "Pakistan" filter should match ALL Pakistani cities, not just the
-            # literal word "pakistan" (jobs are often stored as "Karachi" or "Lahore, PK")
-            pk_terms = {
-                "pakistan", " pk", ",pk", "karachi", "lahore", "islamabad",
-                "rawalpindi", "peshawar", "faisalabad", "multan", "quetta",
-                "sialkot", "gujranwala", "abbottabad", "hyderabad, pak",
-            }
-            jobs = [
-                j for j in jobs
-                if any(term in j.location.lower() for term in pk_terms)
-            ]
+            jobs = [job for job in jobs if any(place in job.location.lower() for place in PAKISTAN_LOCATIONS)]
         else:
-            jobs = [j for j in jobs if loc in j.location.lower()]
-
-    # Job type filter
+            jobs = [job for job in jobs if loc in job.location.lower()]
     if job_type:
-        jt = job_type.lower().replace("-", "").replace("_", "")
-        if jt == "remote":
-            jobs = [
-                j
-                for j in jobs
-                if j.job_type == "remote" or (j.job_type not in ("onsite", "hybrid") and "remote" in j.location.lower())
-            ]
-        elif jt in ("onsite", "hybrid"):
-            jobs = [j for j in jobs if j.job_type == jt]
-        elif jt in ("fulltime", "full time", "parttime", "part time", "internship", "contract"):
-            employment_type = jt.replace(" ", "")
-
+        kind = re.sub(r"[\s_-]", "", job_type.lower())
+        if kind in ("remote", "onsite", "hybrid"):
+            jobs = [job for job in jobs if job.job_type == kind]
+        elif kind in ("fulltime", "parttime", "internship", "contract"):
+            employment_type = kind
     if employment_type:
-        kind = employment_type.lower().replace("-", "").replace("_", "").replace(" ", "")
-        jobs = [j for j in jobs if j.employment_type == kind]
-
-    # Source filter
+        kind = re.sub(r"[\s_-]", "", employment_type.lower())
+        jobs = [job for job in jobs if job.employment_type == kind]
     if source:
-        jobs = [j for j in jobs if j.source == source.lower()]
-
-    # Sort by posted_date (newest first)
-    jobs.sort(key=lambda j: j.posted_date or "", reverse=True)
-
-    total = len(jobs)
+        jobs = [job for job in jobs if job.source == source.lower()]
+    jobs.sort(key=lambda job: (-(query_score(job, q) if q else 0),
+        -(parse_date(job.posted_date).timestamp() if parse_date(job.posted_date) else 0), job.id))
     start = (page - 1) * per_page
-    paginated = jobs[start : start + per_page]
-
-    return paginated, total
+    return jobs[start:start + per_page], len(jobs)

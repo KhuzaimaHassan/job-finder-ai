@@ -3,10 +3,10 @@ import { supabase } from "@/lib/supabase";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-import { 
-  Job, JobSearchResponse, JobSearchParams, 
-  UserProfileRow, ResumeInfo, ATSScoreResult, 
-  SkillGapResult, InterviewQ, Application 
+import {
+  Job, JobSearchResponse, JobSearchParams,
+  UserProfileRow, ResumeInfo, ATSScoreResult,
+  SkillGapResult, InterviewQ, Application, JobIngestionStatus
 } from "@/types";
 export * from "@/types";
 
@@ -35,13 +35,13 @@ export async function searchJobs(
   return data;
 }
 
-export async function getMatchedJobs(
-  page: number = 1,
-  per_page: number = 20
-): Promise<JobSearchResponse> {
-  const { data } = await api.get<JobSearchResponse>("/api/jobs/matched", {
-    params: { page, per_page },
-  });
+export async function getMatchedJobs(params: JobSearchParams = {}): Promise<JobSearchResponse> {
+  const { data } = await api.get<JobSearchResponse>("/api/jobs/matched", { params });
+  return data;
+}
+
+export async function getJobIngestionStatus(): Promise<JobIngestionStatus> {
+  const { data } = await api.get<JobIngestionStatus>("/api/jobs/status");
   return data;
 }
 

@@ -6,9 +6,11 @@ scheduler that refreshes jobs from all APIs every 6 hours.
 """
 
 import os
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slowapi import _rate_limit_exceeded_handler
@@ -17,7 +19,8 @@ from app.limiter import limiter
 
 from app.config import settings
 from app.routers import jobs, auth, resume, profile, ai, applications
-from app.services.job_fetcher import fetch_all_jobs
+from app.services.job_fetcher import fetch_all_jobs, reload_snapshot, cache_ready
+from app.services.ingestion import status as ingestion_status
 
 # Configure logging
 logging.basicConfig(
@@ -31,22 +34,21 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: fetch jobs immediately, then schedule refresh every 6 hours."""
-    logger.info("Starting up — fetching jobs from all sources...")
+    """Warm search before readiness; durable budgets determine which sources are due."""
     try:
-        import asyncio
-        asyncio.create_task(fetch_all_jobs())
-    except Exception as e:
-        logger.error(f"Initial job fetch failed: {e}")
-
-    scheduler.add_job(fetch_all_jobs, "interval", hours=6, id="refresh_jobs")
+        await asyncio.wait_for(reload_snapshot(), timeout=8)
+    except Exception:
+        logger.warning("Job snapshot is warming; readiness will return 503 until loaded")
+    initial = asyncio.create_task(fetch_all_jobs())
+    scheduler.add_job(fetch_all_jobs, "interval", minutes=1, id="refresh_jobs", max_instances=1, coalesce=True)
     scheduler.start()
-    logger.info("Scheduler started — jobs will refresh every 6 hours")
-
     yield
-
-    scheduler.shutdown()
-    logger.info("Scheduler shut down")
+    scheduler.shutdown(wait=False)
+    initial.cancel()
+    try:
+        await initial
+    except asyncio.CancelledError:
+        pass
 
 
 _is_prod = os.getenv("RENDER", "") != "" or os.getenv("ENVIRONMENT", "").lower() == "production"
@@ -92,7 +94,14 @@ async def health_check():
     """Health check endpoint."""
     from app.services.job_fetcher import get_all_jobs
     return {
-        "status": "healthy",
+        "status": "healthy" if cache_ready() else "warming",
+        "ready": cache_ready(),
         "jobs_cached": len(get_all_jobs()),
         "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
     }
+
+
+@app.get("/api/ready")
+async def readiness():
+    data = ingestion_status()
+    return JSONResponse(data, status_code=200 if data["ready"] else 503)

@@ -14,6 +14,9 @@ export interface Job {
   match_score?: number;
   match_method?: "semantic" | "keyword";
   is_active?: boolean;
+  match_reasons?: string[];
+  matching_skills?: string[];
+  source_url?: string | null;
 }
 
 export interface JobSearchResponse {
@@ -24,6 +27,12 @@ export interface JobSearchResponse {
   has_more: boolean;
 }
 
+export interface JobIngestionStatus {
+  ready: boolean; running: boolean; jobs_cached: number; max_posted_age_days: number;
+  last_completed_at: string | null; error?: string | null;
+  sources: Record<string, { status: string; last_success_at?: string; next_due_at?: string; error?: string | null; coverage_capped?: boolean }>;
+}
+
 export interface JobSearchParams {
   q?: string;
   location?: string;
@@ -32,6 +41,7 @@ export interface JobSearchParams {
   source?: string;
   page?: number;
   per_page?: number;
+  posted_within_days?: number;
 }
 
 export interface UserProfileRow {

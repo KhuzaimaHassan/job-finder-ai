@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any, Optional
@@ -6,7 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.schemas.jobs import Job, JobSearchResponse
 from app.services.job_fetcher import search_jobs, get_job_by_id, get_all_jobs, get_archived_job_by_id
 from app.services.auth import get_current_user
-from app.services.supabase_client import get_supabase
+from app.services.supabase_client import get_user_supabase
+from app.services.job_fetcher import cache_ready
+from app.services.ingestion import status as ingestion_status
 from app.services.embeddings import rank_jobs_for_user
 
 logger = logging.getLogger(__name__)
@@ -39,17 +42,29 @@ def _matched_job_payload(job: Any, match_score: float, match_method: str = "keyw
     return payload
 
 
+def require_ready():
+    if not cache_ready():
+        raise HTTPException(503, "Job listings are warming up. Please retry shortly.", headers={"Retry-After": "5"})
+
+
+@router.get("/status")
+def job_ingestion_status():
+    return ingestion_status()
+
+
 @router.get("", response_model=JobSearchResponse)
-async def list_jobs(
-    q: Optional[str] = Query(None, description="Search keyword"),
+def list_jobs(
+    q: Optional[str] = Query(None, max_length=200, description="Search keyword"),
     location: Optional[str] = Query(None, description="Location filter (e.g. 'remote', 'karachi')"),
     job_type: Optional[str] = Query(None, description="Job type: remote, fulltime, parttime, internship"),
     source: Optional[str] = Query(None, description="Source: adzuna, remoteok, remotive"),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Results per page"),
     employment_type: Optional[str] = Query(None, description="fulltime, parttime, internship, contract"),
+    posted_within_days: Optional[int] = Query(None, ge=1, le=365),
 ):
     """Search and filter jobs with pagination."""
+    require_ready()
     jobs, total = search_jobs(
         q=q,
         location=location,
@@ -57,7 +72,7 @@ async def list_jobs(
         source=source,
         page=page,
         per_page=per_page,
-        employment_type=employment_type,
+        employment_type=employment_type, posted_within_days=posted_within_days,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -69,16 +84,18 @@ async def list_jobs(
 
 
 @router.get("/search", response_model=JobSearchResponse)
-async def search_jobs_endpoint(
-    q: Optional[str] = Query(None, description="Search keyword"),
+def search_jobs_endpoint(
+    q: Optional[str] = Query(None, max_length=200, description="Search keyword"),
     location: Optional[str] = Query(None, description="Location filter"),
     type: Optional[str] = Query(None, alias="type", description="Job type filter"),
     source: Optional[str] = Query(None, description="Source filter"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     employment_type: Optional[str] = Query(None),
+    posted_within_days: Optional[int] = Query(None, ge=1, le=365),
 ):
     """Alternative search endpoint with 'type' alias."""
+    require_ready()
     jobs, total = search_jobs(
         q=q,
         location=location,
@@ -86,7 +103,7 @@ async def search_jobs_endpoint(
         source=source,
         page=page,
         per_page=per_page,
-        employment_type=employment_type,
+        employment_type=employment_type, posted_within_days=posted_within_days,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -98,8 +115,9 @@ async def search_jobs_endpoint(
 
 
 @router.get("/stats")
-async def job_stats():
+def job_stats():
     """Return quick stats about the cached jobs."""
+    require_ready()
     all_jobs = get_all_jobs()
     sources: dict[str, int] = {}
     remote_count = 0
@@ -116,6 +134,12 @@ async def job_stats():
 
 @router.get("/matched")
 async def matched_jobs(
+    q: Optional[str] = Query(None, max_length=200),
+    location: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
+    employment_type: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    posted_within_days: Optional[int] = Query(None, ge=1, le=365),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=50),
     user: dict = Depends(get_current_user),
@@ -124,47 +148,28 @@ async def matched_jobs(
     Return jobs ranked by match score to the current user's profile/resume.
     Requires authentication.
     """
-    supabase = get_supabase()
-
-    # Get user profile
+    require_ready()
+    def load_context():
+        supabase = get_user_supabase(user["token"])
+        profiles = supabase.table("profiles").select("*").eq("user_id", user["id"]).execute().data
+        resumes = supabase.table("resumes").select("*").eq("user_id", user["id"]).order("parsed_at", desc=True).limit(1).execute().data
+        return (_decode_supabase_json_columns(profiles[0]) if profiles else {},
+                _decode_supabase_json_columns(resumes[0]) if resumes else None)
     try:
-        profile_result = (
-            supabase.table("profiles").select("*").eq("user_id", user["id"]).execute()
-        )
-        profile = (
-            _decode_supabase_json_columns(profile_result.data[0])
-            if profile_result.data
-            else {}
-        )
+        profile, resume = await asyncio.to_thread(load_context)
+    except Exception as exc:
+        logger.exception("Could not load matching context")
+        raise HTTPException(503, "Could not load your profile and resume. Please retry.") from exc
 
-        resume_result = (
-            supabase.table("resumes")
-            .select("*")
-            .eq("user_id", user["id"])
-            .order("parsed_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        resume = (
-            _decode_supabase_json_columns(resume_result.data[0])
-            if resume_result.data
-            else None
-        )
-    except Exception as e:
-        logger.exception("Supabase error loading profile/resume for matched jobs")
-        raise HTTPException(
-            status_code=500,
-            detail="Could not load profile data",
-        ) from e
-
-    if not profile.get("skills") and not resume:
+    if not profile.get("skills") and not profile.get("target_roles") and not resume:
         raise HTTPException(
             status_code=400,
             detail="Upload a resume or add skills to your profile first",
         )
 
     # Get all jobs and rank them
-    all_jobs_list = get_all_jobs()
+    all_jobs_list, _ = await asyncio.to_thread(search_jobs, q=q, location=location, job_type=job_type, source=source,
+                                              employment_type=employment_type, posted_within_days=posted_within_days, per_page=100000)
     try:
         ranked = await rank_jobs_for_user(
             user_id=user["id"],
@@ -184,7 +189,8 @@ async def matched_jobs(
 
     try:
         job_payloads = [
-            _matched_job_payload(item["job"], item["match_score"], item.get("match_method", "keyword"))
+            {**_matched_job_payload(item["job"], item["match_score"], item.get("match_method", "keyword")),
+             "matching_skills": item.get("matching_skills", []), "match_reasons": item.get("match_reasons", [])}
             for item in page_items
         ]
     except Exception as e:

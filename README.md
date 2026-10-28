@@ -16,28 +16,29 @@ A job-search application for remote technology opportunities and Pakistan listin
 
 ## Are the jobs live and recent?
 
-**The application polls live provider APIs; it is not a real-time feed or an employer-availability guarantee.** Fetching starts when the backend starts and is scheduled every six hours while that process stays running. User searches read an in-memory snapshot instead of calling providers on each request.
+**The application polls live provider APIs and enforces source-date, last-observation, and expiry limits on every search/matching read.** By default a listing must be dated/updated within 30 days and last observed within 14 days. Unknown dates, explicit expiry/closure and checked-unknown availability are excluded. Source dates are not universally original publication dates.
 
-The backend reloads database jobs seen within `JOB_CACHE_MAX_AGE_DAYS` (default **14 days**), merges newly fetched results, and replaces the searchable snapshot. `fetched_at` means **last observed by an importer**; `posted_date` comes from the source and can be much older. Repeatedly returned jobs renew their last-seen timestamp, so the 14-day rule does not mean “posted in the last 14 days.”
+The API checks durable per-provider budgets every minute. Provider refreshes use UTC six-hour slots, with one daily slot for Himalayas. A [GitHub scheduled workflow](.github/workflows/job-refresh.yml) wakes the service at four daily times and verifies readiness; database leases prevent duplicate runs and run records persist across restarts. Scheduling remains best effort, not an uptime SLA.
 
-Old rows are normally **excluded from search, not deleted from Supabase**. Historical job links can return an archived page with Apply disabled. There are no persisted batch records or automatic batch rotation. The optional standalone scraper currently has a separate hard-delete cleanup and should not be used unchanged when historical links must be preserved.
+Records are archived from discovery, **not hard-deleted**. Both the cloud path and optional local scraper preserve saved-job history. Historical detail links disable Apply. This is a timestamp/status policy with durable run history, rather than destructive batch rotation.
 
-See [job fetching, freshness, limitations, and improvement priorities](docs/JOB_FETCHING.md), including the [dated production audit](docs/job-freshness-audit-2026-10-28.json). Those counts are a snapshot, not a live dashboard.
+Search supports word-aware terms/phrases, combined filters and last-7/14-day views in both All Jobs and Matched for Me. Personalized ranking uses skills, target roles, entered experience, known location restrictions and the latest resume, with visible match reasons and a consistent profile-based fallback.
 
 ### Current source coverage
 
-| Source | Scheduled cloud behavior | Coverage and requirements |
-| --- | --- | --- |
-| RemoteOK | One API request per refresh | Public feed, filtered by broad technology keywords |
-| Remotive | 15 category/search requests per refresh | Public API; overlapping requests; needs consolidation and rate control |
-| Himalayas | Five searches, first page, at most 20 per search | Public API; no full traversal or explicit newest-first sort |
-| Jobicy | Four requests, at most 50 per request | Existing `/api/v2/remote-jobs` adapter; no cursor traversal or stored-job status checks |
-| Adzuna | Three first-page queries, GB/US/India, up to 50 each | Requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`; no Pakistan API query |
-| Indeed / Google via JobSpy helper | Only attempted if optional `python-jobspy` is installed | Package is absent from production requirements; no scheduled Pakistan coverage in the standard deployment |
-| Indeed / LinkedIn standalone scraper | Separate manual process | `backend/scripts/scrape_and_upload.py`; no recurring runner is provisioned |
-| JSearch | Disabled in the aggregator | Setting a key alone does not re-enable it; provider budget must be reviewed first |
+| Source | Behavior |
+| --- | --- |
+| RemoteOK | One feed per due slot; technology-role filtering |
+| Remotive | One broad feed per due slot; filtered locally, avoiding overlapping burst queries |
+| Himalayas | Five newest-first searches with bounded sequential pages; expiry/identity/restrictions persisted |
+| Jobicy | Canonical cursor feed plus stored-job availability checks |
+| Adzuna | Optional credentialed GB/US/India searches, date ordering and bounded pages |
+| Indeed / LinkedIn | Separate optional manual scraper; no provisioned automatic Pakistan importer |
+| JSearch | Disabled pending an operating-budget decision |
 
-“Remote” may still mean restricted to a country or timezone. The current application does not establish that every remote result accepts applicants in Pakistan. Keyword filtering can also include adjacent or unrelated roles.
+Page budgets intentionally bound discovery; coverage caps and provider failures are reported rather than treated as a complete catalogue. Remote jobs can have country/timezone restrictions. Employer availability remains subject to change.
+
+See [job fetching, search, matching and operations](docs/JOB_FETCHING.md). The [28 October production audit](docs/job-freshness-audit-2026-10-28.json) documents the **previous** implementation and is retained as historical evidence.
 
 ## Architecture and repository
 
@@ -45,7 +46,7 @@ See [job fetching, freshness, limitations, and improvement priorities](docs/JOB_
 flowchart LR
     Browser[Next.js frontend / Vercel] --> API[FastAPI / Render]
     Browser --> Auth[Supabase Auth / Google OAuth]
-    Providers[External job APIs] --> Fetch[Startup + in-process six-hour refresh]
+    Providers[External job APIs] --> Fetch[Durable provider slots + minute coordinator]
     Fetch --> Cache[In-memory searchable snapshot]
     Fetch --> Jobs[(Supabase shared jobs table)]
     Jobs --> Fetch
@@ -53,6 +54,8 @@ flowchart LR
     API --> UserData[(RLS-protected profile / resume / tracker)]
     API --> Gemini[Gemini parsing and matching]
     Local[Optional standalone scraper] --> Jobs
+    Schedule[GitHub scheduled readiness check] --> API
+    Fetch --> Runs[(Private budgets / leases / run log)]
 ```
 
 | Area | Implementation |
@@ -66,10 +69,13 @@ flowchart LR
 ```text
 backend/app/main.py                  API startup, CORS, scheduler, health
 backend/app/routers/                  Jobs, auth, profile, resume, AI, tracker
-backend/app/services/job_fetcher.py   Provider adapters, persistence, snapshot
+backend/app/services/job_fetcher.py   Snapshot, persistence, search
+backend/app/services/job_sources.py   Bounded provider adapters
+backend/app/services/ingestion.py     Durable leases, provider budgets and run history
+backend/app/services/job_policy.py    Shared freshness/search/eligibility rules
 backend/app/services/embeddings.py    Bounded semantic ranking and fallback
 backend/scripts/audit_freshness.py    Read-only live freshness audit
-backend/scripts/scrape_and_upload.py  Optional manual scraper; see cleanup caveat
+backend/scripts/scrape_and_upload.py  Optional manual scraper; preserves history
 backend/tests/                       Regression tests and disposable browser fixture
 frontend/src/app/                    Dashboard, job, profile, resume, tracker, login
 frontend/src/components/             Navigation, job cards, filters, AI dialogs
@@ -86,7 +92,7 @@ Use **Python 3.12** to match the deployed backend and **Node.js 20.9+** (Node 22
 
 ### 1. Supabase and Google sign-in
 
-1. Create or select a Supabase project. Review and run [`supabase_setup.sql`](supabase_setup.sql) in its SQL editor. It creates `jobs`, `profiles`, `resumes`, `applications`, RLS policies, the signup profile trigger, and a private `resumes` PDF bucket with user-folder policies. Review policy changes before rerunning it on an existing project.
+1. For an existing installation apply [`backend/migrations/20261028_ingestion.sql`](backend/migrations/20261028_ingestion.sql) before this release. For a new installation create or select a Supabase project. Review and run [`supabase_setup.sql`](supabase_setup.sql) in its SQL editor. It creates `jobs`, `profiles`, `resumes`, `applications`, RLS policies, the signup profile trigger, and a private `resumes` PDF bucket with user-folder policies. Review policy changes before rerunning it on an existing project.
 2. Enable Google in Supabase Authentication and configure the Google OAuth client for your Supabase callback URL.
 3. Set the Supabase Site URL to your frontend URL and allow `http://localhost:3000/dashboard` for local OAuth redirects. Allow `https://job-finder-ai-kappa.vercel.app/dashboard` for this production frontend, or the equivalent URL for your own deployment.
 4. Keep the Supabase service-role key on the backend only. The browser uses the public anon key and the signed-in user's token. Jobs are publicly readable; user tables and resume objects use user policies.
@@ -140,7 +146,10 @@ Set the frontend environment values before starting. Open [localhost:3000](http:
 | `GEMINI_EMBEDDING_MODEL` | Backend | `gemini-embedding-001` default |
 | `MATCH_CANDIDATE_LIMIT` | Backend | Semantic shortlist, default 100, maximum 100 |
 | `MATCH_TIMEOUT_SECONDS` | Backend | Semantic ranking deadline, default 20, maximum 40 |
-| `JOB_CACHE_MAX_AGE_DAYS` | Backend | Last-seen database loading window, default 14; not a publication-age filter |
+| `JOB_CACHE_MAX_AGE_DAYS` | Backend | Maximum last-observation age, default 14; also enforced at read time |
+| `JOB_POSTED_MAX_AGE_DAYS` | Backend | Source publication/update age cap, default 30 |
+| `JOB_PROVIDER_MAX_PAGES` | Backend | Sequential traversal budget per query, default 5 |
+| `JOB_REFRESH_TIMEOUT_SECONDS` | Backend | Whole-run deadline, default 240 seconds |
 | `FRONTEND_URL` | Backend | Allowed frontend origin for CORS |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Backend | Optional Adzuna credentials |
 | `JSEARCH_API_KEY` | Backend | Unused by the scheduled aggregator while its calls remain disabled |
@@ -148,7 +157,7 @@ Set the frontend environment values before starting. Open [localhost:3000](http:
 | `NEXT_PUBLIC_SUPABASE_URL` | Frontend | Same Supabase project as the backend |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend | Public anon key; never the service-role key |
 
-Refresh frequency is currently hard-coded to six hours in `backend/app/main.py`; it is not an environment setting. `NEXT_PUBLIC_*` values are embedded at build time, so changing them requires a frontend rebuild.
+The coordinator ticks once per minute, while durable UTC source slots limit actual provider requests. See the fetching guide for schedule and coverage limits. `NEXT_PUBLIC_*` values are embedded at build time, so changing them requires a frontend rebuild.
 
 ## API reference
 
@@ -156,8 +165,10 @@ The frontend attaches the current Supabase bearer token to authenticated request
 
 | Route | Access | Purpose |
 | --- | --- | --- |
-| `GET /api/health` | Public | Process health, cached count, deployment revision; does not prove a recent successful refresh |
-| `GET /api/jobs` | Public | Search; `q`, `location`, `job_type`, `employment_type`, `source`, `page`, `per_page` (1–100) |
+| `GET /api/health` | Public | Liveness, readiness, cached count and deployment revision |
+| `GET /api/ready` | Public | 200/503 readiness and ingestion state |
+| `GET /api/jobs/status` | Public | Sanitized provider outcomes, times and coverage limits |
+| `GET /api/jobs` | Public | Search; `q`, `location`, `job_type`, `employment_type`, `source`, `posted_within_days`, `page`, `per_page` (1–100) |
 | `GET /api/jobs/search` | Public | Alias that uses `type` for work arrangement instead of `job_type` |
 | `GET /api/jobs/stats` | Public | Current snapshot counts by source |
 | `GET /api/jobs/{id}` | Public | Active detail or retained archived record |
@@ -170,7 +181,7 @@ The frontend attaches the current Supabase bearer token to authenticated request
 | `PATCH/DELETE /api/applications/{id}` | Bearer token | Edit status/notes or remove an application |
 | `POST /api/ai/{tool}` | Bearer token | `ats-score`, `cover-letter`, `skill-gap`, `interview-prep`, `resume-improve` |
 
-Example: `GET /api/jobs?q=python&job_type=remote&employment_type=fulltime&page=1&per_page=20`. All Jobs queries match descriptions as well as titles. There is no public “fetch now” endpoint, publication-date filter, or ingestion-run dashboard.
+Example: `GET /api/jobs?q=python&job_type=remote&employment_type=fulltime&page=1&per_page=20`. All Jobs queries match descriptions as well as titles. There is no privileged public “fetch now” endpoint. Source-date filters and sanitized run/source status are available.
 
 ## Verification
 
@@ -225,11 +236,11 @@ This repository's existing integrations deploy changes merged to `main`:
 - **Vercel:** root directory `frontend`; configure the three `NEXT_PUBLIC_*` variables.
 - **Render:** root directory `backend`; `pip install -r requirements.txt`; production entrypoint `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Configure backend secrets and `FRONTEND_URL`. See [render.yaml](render.yaml).
 - **Release check:** compare the frontend `X-App-Revision` header and backend `/api/health` JSON `revision` with the GitHub main commit. Neither marker confirms ingestion health.
-- **Scheduler:** runs inside the API process; use one worker/instance with this design. Multiple workers start independent schedulers and caches. A web-service restart starts a new fetch and resets the interval. If your Render instance can sleep, unattended six-hour execution is not assured. See [operational guidance and provider references](docs/JOB_FETCHING.md#operations-and-troubleshooting).
-- **Manual scraper:** no recurring runner is provisioned. Read the [cleanup caveat](docs/JOB_FETCHING.md#optional-local-scraper) before using it; its existing cleanup can delete archived job records.
+- **Scheduler:** the minute coordinator reads durable source budgets and leases. The GitHub scheduled readiness check wakes a sleeping web service at 00:23/06:23/12:23/18:23 UTC. Delayed Actions/service outages remain possible; inspect database run records and public status.
+- **Manual scraper:** a separate optional importer, with no recurring Pakistan runner configured. Old records are retained and the API applies its shared freshness policy.
 
 ## Known limitations and next work
 
-The fetching approach is suitable as an MVP foundation, but does not yet provide strict freshness, complete discovery, or a durable ingestion service. Priorities are a durable scheduler/run log, provider-specific rate budgets, explicit expiry/closure validation, cursor/page coverage, and one archive/retention policy shared by every importer. The current Gemini chat SDK is also deprecated and needs migration. Detailed acceptance criteria are in [JOB_FETCHING.md](docs/JOB_FETCHING.md#prioritized-improvements).
+The release enforces freshness, expiry and history preservation, records durable runs and source budgets, and verifies search/matching behavior. Discovery is still bounded and source availability is external; full catalogue traversal, complete geocoding/eligibility, an exact schedule SLA, and a sustainable automatic Pakistan feed remain outside this implementation. The current Gemini chat SDK also needs migration. See [JOB_FETCHING.md](docs/JOB_FETCHING.md) and [VERIFICATION.md](VERIFICATION.md) for current behavior and validation limits.
 
 No license file is currently included in the repository; this README does not grant or invent a license.

@@ -1,6 +1,8 @@
 "use client";
 
 const FILTER_OPTIONS = [
+  { key: "posted_within_days", value: "7", label: "Last 7 days" },
+  { key: "posted_within_days", value: "14", label: "Last 14 days" },
   { key: "job_type", value: "remote", label: "🌍 Remote" },
   { key: "location", value: "pakistan", label: "🇵🇰 Pakistan" },
   { key: "location", value: "karachi", label: "📍 Karachi" },
@@ -59,6 +61,7 @@ export function FilterPills({ filters, onFilterChange }: FilterPillsProps) {
       {Object.values(filters).some(Boolean) && (
         <button
           onClick={() => {
+            onFilterChange("posted_within_days", undefined);
             onFilterChange("job_type", undefined);
             onFilterChange("employment_type", undefined);
             onFilterChange("location", undefined);

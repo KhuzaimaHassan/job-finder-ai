@@ -80,3 +80,15 @@ values before deployment; use `app.main:app`, never `tests.browser_app:app`, for
 production backend.
 
 The existing Gemini chat SDK emits a deprecation warning. Live synthetic calls still pass; migration to the replacement SDK remains a separate maintenance item.
+
+## Ingestion/search/matching follow-up
+
+The user applied `backend/migrations/20261028_ingestion.sql`; backend read checks confirmed its metadata fields and private ingestion tables. A real concurrency smoke test on `claim_job_refresh` returned one winner and one refusal, then released only the test-owned lease. No jobs or user data were removed by that check.
+
+The expanded backend suite passes 35 tests covering read-time expiry/source-age policy, word/phrase/alias search, combined filters, stable pagination, distinct-location records, explicit location/timezone conflicts, profile/resume-driven ranking, experience changes, bounded retries, partial pages, persisted budgets and last-good snapshot retention. Existing resume/tracker/AI reliability regressions remain included. Expected synthetic failure logs exercise fallback paths.
+
+Local browser checks passed against the disposable API fixture: five valid discovery records, with old/expired records absent; Python/SQL/FastAPI in Karachi yields three matches, excluding Java-only and US-restricted jobs; Remote + Full-time + Python SQL yields two matched results; changing the saved profile to Java/Java Engineer immediately yields one Java match. Match reasons render and the browser console is clean. The frontend production build and TypeScript/ESLint checks passed before these browser checks; final small UI copy/status changes are checked again for release.
+
+Public provider smoke checks: Himalayas parsed 20 requested records; canonical Jobicy cursor traversal parsed 159 relevant records within its cap. Remotive and RemoteOK encountered local connection errors, which are reported as failures instead of being mistaken for successful empty feeds. Live Render source outcomes must be inspected separately after deployment; local connectivity does not establish provider availability on Render.
+
+With explicit authorization, the live profile was filled from the public portfolio: 27 published skills, four stated career-role areas and Karachi. The existing zero completed-years value was preserved because the public site documents internships under a completed year. Save/reload succeeded. No resume was uploaded or fabricated for that check.

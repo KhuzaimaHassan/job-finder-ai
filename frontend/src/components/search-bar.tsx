@@ -32,6 +32,7 @@ export function SearchBar({ onSearch }: { onSearch: (query: string) => void }) {
           </div>
           <Input
             type="text"
+            maxLength={200}
             value={value}
             onChange={handleChange}
             placeholder="Search jobs... e.g. python, AI, data science"

@@ -6,7 +6,7 @@ It exercises the real routers with disposable storage and deterministic AI respo
 import base64
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +49,12 @@ db.rows["jobs"].append({**db.rows["jobs"][0], "id": "local_long",
     "company": "Example Company With A Deliberately Long Name For Layout Verification",
     "description": "<p>Full-time engineering position. Python, Docker and SQL.</p><pre>" + "very_long_code_" * 40 + "</pre>",
     "tags": ["Python", "Docker", "SQL"]})
+db.rows["jobs"].extend([
+    {**db.rows["jobs"][0], "id":"local_java", "title":"Java Engineer", "description":"Build Java services. Full-time.", "tags":["Java"]},
+    {**db.rows["jobs"][0], "id":"local_us", "title":"US Python Engineer", "location":"USA", "location_restrictions":["United States"]},
+    {**db.rows["jobs"][0], "id":"local_old", "title":"Archived Python Engineer", "posted_date":(datetime.now(timezone.utc)-timedelta(days=60)).isoformat()},
+    {**db.rows["jobs"][0], "id":"local_expired", "title":"Expired Python Engineer", "expires_at":(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()},
+])
 job_fetcher._job_store = {row["id"]: job_fetcher._job_from_row(row) for row in db.rows["jobs"]}
 job_fetcher._get_supabase_client = lambda: db
 for module in (profile, resume, applications, jobs):

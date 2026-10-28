@@ -18,6 +18,14 @@ class Job(BaseModel):
     job_type: Optional[str] = None  # "remote" | "onsite" | "hybrid"
     is_active: bool = True
     employment_type: Optional[str] = None
+    fetched_at: Optional[str] = None
+    first_seen_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    availability: str = "unverified"
+    provider_id: Optional[str] = None
+    source_url: Optional[str] = None
+    location_restrictions: List[str] = []
+    timezone_restrictions: List[int] = []  # minutes east of UTC, including half-hour offsets
 
     @model_validator(mode="after")
     def normalize_classification(self):

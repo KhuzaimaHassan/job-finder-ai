@@ -1,6 +1,7 @@
 """Disposable data stores and PDFs for local regression tests; no cloud clients."""
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import threading
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -60,6 +61,7 @@ class MemoryQuery:
 
     def select(self, *_args): return self
     def eq(self, key, value): self.filters.append(lambda r: r.get(key) == value); return self
+    def in_(self, key, values): self.filters.append(lambda r: r.get(key) in values); return self
     def gte(self, key, value): self.filters.append(lambda r: r.get(key, "") >= value); return self
     def order(self, key, desc=False): self.ordering = (key, desc); return self
     def limit(self, n): self.maximum = n; return self
@@ -113,6 +115,23 @@ class MemoryDB:
     def __init__(self, rows=None):
         self.rows = deepcopy(rows or {})
         self.storage, self.fail_insert, self.deletes = MemoryStorage(), set(), []
+        self.lock = threading.Lock()
 
     def table(self, name):
         return MemoryQuery(self, name)
+
+    def rpc(self, name, params):
+        def execute():
+            assert name == "claim_job_refresh"
+            with self.lock:
+                now = datetime.now(timezone.utc)
+                rows = self.rows.setdefault("job_ingestion_state", [])
+                row = next((r for r in rows if r["id"] == "global"), None)
+                if row and row.get("lease_owner") and row.get("lease_until", "") > now.isoformat():
+                    return SimpleNamespace(data=False)
+                if row is None:
+                    row = {"id": "global", "sources": {}}
+                    rows.append(row)
+                row.update(lease_owner=params["p_owner"], lease_until=(now + timedelta(seconds=params["p_seconds"])).isoformat())
+                return SimpleNamespace(data=True)
+        return SimpleNamespace(execute=execute)
