@@ -1,0 +1,39 @@
+name: Scheduled job refresh verification
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: production-job-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Wakes a sleeping API. Startup/minute tick claims only due provider slots
+      # through the database lease. No admin endpoint or credentials are exposed.
+      - name: Wake API and verify due ingestion completes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request
+          url = 'https://job-finder-ai-backend.onrender.com/api/ready'
+          last = None
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as response:
+                      last = json.load(response)
+                  if last.get('ready') and not last.get('running') and last.get('sources'):
+                      print(json.dumps(last, indent=2))
+                      if last.get('error') or any(s.get('status') == 'failed' for s in last['sources'].values()):
+                          raise SystemExit('A provider refresh failed; inspect the saved source/run status')
+                      break
+              except (OSError, ValueError) as error:
+                  print('API warming/read failed:', type(error).__name__)
+              time.sleep(15)
+          else:
+              print(json.dumps(last))
+              raise SystemExit('API did not become ready within the verification window')
+          PY

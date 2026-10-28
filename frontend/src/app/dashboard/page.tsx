@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { searchJobs, getMatchedJobs, type Job, type JobSearchParams, type JobSearchResponse } from "@/lib/api";
+import { searchJobs, getMatchedJobs, getJobIngestionStatus, type JobIngestionStatus, type Job, type JobSearchParams, type JobSearchResponse } from "@/lib/api";
 import { JobCard } from "@/components/job-card";
 import { SearchBar } from "@/components/search-bar";
 import { FilterPills } from "@/components/filter-pills";
@@ -13,6 +13,7 @@ import { Sparkles, Globe } from "lucide-react";
 import { isAxiosError } from "axios";
 
 function DashboardPageContent() {
+  const [ingestion, setIngestion] = useState<JobIngestionStatus | null>(null);
   const [matchMode, setMatchMode] = useState<"all" | "matched">("all");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,12 +27,14 @@ function DashboardPageContent() {
     employment_type?: string;
     location?: string;
     source?: string;
+    posted_within_days?: string;
   }>({});
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let active = true;
 
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const fetchJobs = async () => {
       setLoading(true);
       setError(null);
@@ -44,12 +47,13 @@ function DashboardPageContent() {
         source: filters.source || undefined,
         page: page,
         per_page: 20,
+        posted_within_days: filters.posted_within_days ? Number(filters.posted_within_days) : undefined,
       };
 
       try {
         let data: JobSearchResponse;
         if (matchMode === "matched") {
-          data = await getMatchedJobs(page, 20);
+          data = await getMatchedJobs(params);
         } else {
           data = await searchJobs(params);
         }
@@ -59,14 +63,17 @@ function DashboardPageContent() {
         setHasMore(data.has_more);
       } catch (err: unknown) {
         if (!active) return;
-        console.error("Failed to fetch jobs:", err);
+        const warming = isAxiosError(err) && err.response?.status === 503;
+        if (warming) retryTimer = setTimeout(() => { if (active) setRetryCount(count => count + 1); }, 5000);
         setJobs([]);
         setTotal(0);
         setHasMore(false);
         if (isAxiosError(err) && err.response?.status === 400 && matchMode === "matched") {
           setError("Please add skills to your profile or upload a resume to see matched jobs.");
+        } else if (warming) {
+          setError("Listings are being prepared. Retrying shortly…");
         } else {
-          setError("Failed to load jobs. Make sure the backend is running.");
+          setError("Could not load jobs. Please retry.");
         }
       } finally {
         if (active) setLoading(false);
@@ -77,8 +84,17 @@ function DashboardPageContent() {
 
     return () => {
       active = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [searchQuery, filters, page, matchMode, retryCount]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => { void getJobIngestionStatus().then(data => { if (active) setIngestion(data); }).catch(() => {}); };
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -114,7 +130,7 @@ function DashboardPageContent() {
                 Job
               </h2>
               <p className="text-gray-400 text-sm sm:text-base max-w-2xl mx-auto mb-8 px-4">
-                Real-time jobs matched to your resume and skills
+Recent listings matched to your resume and skills
               </p>
               
               <div className="flex justify-center mb-8 px-4">
@@ -145,7 +161,7 @@ function DashboardPageContent() {
               </div>
             </div>
 
-            {matchMode === "all" && (
+            {(
               <>
                 <SearchBar onSearch={handleSearch} />
                 <FilterPills filters={filters} onFilterChange={handleFilterChange} />
@@ -155,10 +171,18 @@ function DashboardPageContent() {
 
         {/* Results */}
         <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
+          <div className="mb-5 space-y-2 text-sm text-zinc-400" role="status">
+            <p>Listings dated or updated within {ingestion?.max_posted_age_days ?? 30} days. Employer availability can change.</p>
+            {ingestion?.running && <p className="text-indigo-300">Refreshing sources; showing the latest saved listings.</p>}
+            {ingestion && (ingestion.error || Object.values(ingestion.sources).some(source => source.status === "failed" || source.error)) && <p className="text-amber-300">Some sources could not refresh. Their last saved listings remain subject to the freshness limit.</p>}
+            {ingestion && Object.values(ingestion.sources).some(source => source.coverage_capped) && <p>Some sources supplied a limited set of listings.</p>}
+            {ingestion?.last_completed_at && <p>Last refresh completed: {new Date(ingestion.last_completed_at).toLocaleString()}</p>}
+            {matchMode === "matched" && <p>Ranked from your saved skills, target roles, experience, location and latest resume. Known location conflicts are excluded; scores estimate relevance.</p>}
+          </div>
           {/* Result count */}
           <div className="flex flex-wrap items-center justify-between gap-2 mb-6" aria-live="polite">
             <p className="text-sm text-gray-400">
-              {loading ? "Searching..." : `${total} jobs found`}
+              {loading ? "Searching..." : `${total} ${total === 1 ? "job" : "jobs"} found`}
             </p>
             {total > 0 && (
               <p className="text-sm text-gray-500">

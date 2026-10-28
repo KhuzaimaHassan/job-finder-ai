@@ -15,6 +15,7 @@ import numpy as np
 from typing import Any, List
 
 from app.config import settings
+from app.services.job_policy import term_matches, location_eligible, minimum_experience, parse_date
 
 logger = logging.getLogger(__name__)
 
@@ -89,83 +90,67 @@ def _terms_from_resume_raw_text(raw_text: str | None, max_terms: int = 80) -> se
 
 
 def _collect_match_terms(profile: dict, resume: dict | None) -> set[str]:
-    """Terms used for keyword-based scoring (lowercased)."""
-    terms: set[str] = set()
-    for s in _normalize_string_list(profile.get("skills")):
-        terms.add(s.lower())
-    for r in _normalize_string_list(profile.get("target_roles")):
-        terms.add(r.lower())
+    # Employer names, candidate names and project names are not qualifications.
+    skills = _normalize_string_list(profile.get("skills"))
     if resume:
-        for s in _normalize_string_list(resume.get("skills")):
-            terms.add(s.lower())
-        for exp in _as_list(resume.get("experience")):
-            if isinstance(exp, dict):
-                title = (exp.get("title") or "").strip()
-                company = (exp.get("company") or "").strip()
-                if title:
-                    terms.add(title.lower())
-                if company:
-                    terms.add(company.lower())
-        for proj in _as_list(resume.get("projects")):
-            if isinstance(proj, dict):
-                name = (proj.get("name") or "").strip()
-                if name:
-                    terms.add(name.lower())
-        summary = resume.get("summary")
-        if isinstance(summary, str) and summary.strip():
-            blob = summary.lower()
-            for chunk in re.findall(r"[a-z][a-z0-9+#.-]{2,}", blob):
-                if chunk not in _BASIC_STOPWORDS:
-                    terms.add(chunk)
-
-    terms = {t for t in terms if len(t) >= 2}
-    if not terms and resume and resume.get("raw_text"):
-        terms = _terms_from_resume_raw_text(str(resume.get("raw_text")))
-    return terms
+        skills += _normalize_string_list(resume.get("skills"))
+        if not skills and resume.get("raw_text"):
+            from app.services.job_fetcher import _extract_tags
+            skills = _extract_tags(str(resume["raw_text"]))
+    return {skill.lower() for skill in skills if skill.strip()}
 
 
 def _keyword_match_score(terms: set[str], job: Any) -> float:
-    """Score 0–100 from overlap between user terms and job text."""
     if not terms:
         return 0.0
-    tags = getattr(job, "tags", None) or []
-    if isinstance(tags, list):
-        tag_str = " ".join(str(t) for t in tags)
-    else:
-        tag_str = str(tags) if tags else ""
-    title = str(getattr(job, "title", "") or "")
-    desc = str(getattr(job, "description", "") or "")
-    blob = f"{title} {desc} {tag_str}".lower()
-
-    hits = 0
-    for term in terms:
-        if not term:
-            continue
-        if term in blob:
-            hits += 1
-            continue
-        # Allow hyphen/space variants for multi-word roles (e.g. "machine learning")
-        compact = term.replace(" ", "")
-        if compact and compact in blob.replace(" ", ""):
-            hits += 1
-
-    ratio = hits / max(len(terms), 1)
-    return round(min(100.0, ratio * 100.0), 1)
+    blob = f"{job.title} {job.description} {' '.join(job.tags)}"
+    return round(100 * sum(term_matches(blob, term) for term in terms) / len(terms), 1)
 
 
-def _rank_jobs_keyword_based(
-    profile: dict,
-    resume: dict | None,
-    jobs: list,
-    top_n: int,
-) -> list[dict]:
+def _profile_match(profile, resume, job):
+    if not location_eligible(job, profile.get("location")):
+        return None
     terms = _collect_match_terms(profile, resume)
-    scored: list[dict] = []
-    for job in jobs:
-        scored.append(
-            {"job": job, "match_score": _keyword_match_score(terms, job), "match_method": "keyword"},
-        )
-    scored.sort(key=lambda x: x["match_score"], reverse=True)
+    blob = f"{job.title} {job.description} {' '.join(job.tags)}"
+    hits = sorted(term for term in terms if term_matches(blob, term))
+    roles = _normalize_string_list(profile.get("target_roles"))
+    def role_alignment(role):
+        if term_matches(job.title, role):
+            return 100.0
+        words = re.findall(r"[A-Za-z][A-Za-z+#.]*", role)
+        return 100 * sum(term_matches(job.title, word) for word in words) / max(1, len(words))
+    role_score = max((role_alignment(role) for role in roles), default=0)
+    if (terms and not hits) or (not terms and role_score == 0):
+        return None
+    from app.services.job_fetcher import _extract_tags
+    missing = [skill for skill in _extract_tags(blob) if not any(term_matches(skill, term) or term_matches(term, skill) for term in terms)]
+    parts, reasons = [], []
+    if terms:
+        # Adding unrelated skills to a profile must not lower the same job fit.
+        parts.append((60, len(hits) / max(1, len(hits) + len(missing)) * 100))
+        reasons.append("Matching skills: " + ", ".join(hits[:6]))
+        if missing:
+            reasons.append("Other listed technologies: " + ", ".join(missing[:5]))
+    if roles:
+        parts.append((25, role_score))
+        reasons.append("Target role aligns" if role_score >= 50 else "Limited target-role alignment")
+    required = minimum_experience(job)
+    years = max(0, profile.get("experience_years") or 0)
+    if required is not None:
+        if required > years + 2:
+            return None  # Explicit minimum is materially beyond entered experience.
+        parts.append((10, 100 if years >= required else years / required * 100))
+        reasons.append(f"Experience: {years} years entered; listing asks for {required}+")
+    if profile.get("location"):
+        reasons.append("No known conflict with your entered location; check employer eligibility")
+    score = sum(weight * value for weight, value in parts) / sum(weight for weight, _ in parts)
+    return {"job": job, "match_score": round(score, 1), "match_method": "keyword",
+            "matching_skills": hits, "match_reasons": reasons}
+
+
+def _rank_jobs_keyword_based(profile: dict, resume: dict | None, jobs: list, top_n: int) -> list[dict]:
+    scored = [item for job in jobs if (item := _profile_match(profile, resume, job))]
+    scored.sort(key=lambda item: (-item["match_score"], -(parse_date(item["job"].posted_date).timestamp() if parse_date(item["job"].posted_date) else 0), item["job"].id))
     return scored[:top_n]
 
 
@@ -223,8 +208,6 @@ async def get_user_embedding(user_id: str, profile: dict, resume: dict | None = 
     Generate and cache an embedding for a user based on their profile + resume.
     """
     parts: List[str] = []
-    if profile.get("name"):
-        parts.append(f"Name: {profile['name']}")
     skills = _normalize_string_list(profile.get("skills"))
     if skills:
         parts.append(f"Skills: {', '.join(skills)}")
@@ -284,18 +267,12 @@ async def rank_jobs_for_user(
     Rank jobs by match score for a user.
     Returns list of {job: Job, match_score: float}.
     """
-    if not settings.GEMINI_API_KEY:
-        logger.info("GEMINI_API_KEY not set; using keyword-based job matching")
-        return _rank_jobs_keyword_based(profile, resume, jobs, top_n)
-
-    # Shortlist before making any provider calls. Never embed thousands of jobs
-    # during one request. All scores in a response use the same method.
-    fallback = _rank_jobs_keyword_based(profile, resume, jobs, top_n)
-    candidates = _rank_jobs_keyword_based(
-        profile, resume, jobs, max(1, min(settings.MATCH_CANDIDATE_LIMIT, 100)),
-    )
-    if not candidates:
-        return []
+    # The same bounded candidate set is used in semantic and fallback modes.
+    # Every candidate must already match skills/roles and known geography.
+    fallback = await asyncio.to_thread(_rank_jobs_keyword_based, profile, resume, jobs, min(top_n, settings.MATCH_CANDIDATE_LIMIT))
+    if not settings.GEMINI_API_KEY or not fallback:
+        return fallback
+    candidates = fallback
     try:
         async with asyncio.timeout(settings.MATCH_TIMEOUT_SECONDS):
             user_emb = await get_user_embedding(user_id, profile, resume)
@@ -312,13 +289,11 @@ async def rank_jobs_for_user(
                     if len(_job_embeddings) >= 1000:
                         _job_embeddings.pop(next(iter(_job_embeddings)))
                     _job_embeddings[job.id] = (_embedding_key(text), vector)
-            scored_jobs = [
-                {"job": item["job"], "match_score": await compute_match_score(
-                    user_emb, _job_embeddings[item["job"].id][1],
-                ), "match_method": "semantic"}
-                for item in candidates
-            ]
-            scored_jobs.sort(key=lambda x: x["match_score"], reverse=True)
+            scored_jobs = []
+            for item in candidates:
+                semantic = await compute_match_score(user_emb, _job_embeddings[item["job"].id][1])
+                scored_jobs.append({**item, "match_score": round(item["match_score"] * .8 + semantic * .2, 1), "match_method": "semantic"})
+            scored_jobs.sort(key=lambda item: (-item["match_score"], item["job"].id))
             return scored_jobs[:top_n]
     except Exception as e:
         logger.warning(

@@ -279,13 +279,8 @@ def upload_to_supabase(jobs: list) -> int:
 
 
 def delete_old_jobs(days: int = 14) -> None:
-    """Remove jobs older than `days` days to keep the table clean."""
-    try:
-        cutoff_dt = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        supabase.table("jobs").delete().lt("fetched_at", cutoff_dt).execute()
-        logger.info(f"Cleaned up jobs older than {days} days")
-    except Exception as e:
-        logger.warning(f"Cleanup failed (non-critical): {e}")
+    """Compatibility no-op: shared job history must never be hard-deleted here."""
+    logger.info("History retained; the API excludes stale/old observations at read time")
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +303,7 @@ def main():
     upserted = upload_to_supabase(jobs)
     logger.info(f"✅ {upserted} jobs upserted to Supabase")
 
-    logger.info(f"\n🧹 Cleaning up listings older than 14 days...")
+    logger.info("Shared job history retained; stale jobs are excluded by API policy.")
     delete_old_jobs(days=14)
 
     try:
@@ -317,7 +312,7 @@ def main():
     except Exception:
         pass
 
-    logger.info("\n🎉 Done! Trigger a Render redeploy to serve these jobs in production.")
+    logger.info("Done. The API reloads imports on its next coordinator tick; no redeploy is needed.")
 
 
 if __name__ == "__main__":

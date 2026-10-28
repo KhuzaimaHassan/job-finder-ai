@@ -10,17 +10,22 @@ from app.services import job_fetcher as jf, embeddings as em, resume_parser
 from app.routers import resume
 from app.schemas.jobs import Job
 from tests.support import MemoryDB, make_pdf
+from app.services import job_sources as sources, ingestion
+from app.services.job_sources import Feed
 
 
 def job(id="python", title="Python Engineer", **kwargs):
-    return Job(id=id, title=title, company="Local Test", location="Remote",
-               description="Python and FastAPI engineering", url="https://example.com/job",
-               source="remoteok", **kwargs)
+    kwargs.setdefault("posted_date", datetime.now(timezone.utc).isoformat())
+    return Job(**{"id": id, "title": title, "company": "Local Test", "location": "Remote",
+                  "description": "Python and FastAPI engineering", "url": "https://example.com/job",
+                  "source": "remoteok", **kwargs})
 
 
 class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         jf._job_store = {}
+        jf._cache_loaded = False
+        jf._refresh_finished = False
         em._job_embeddings.clear()
         em._user_embeddings.clear()
 
@@ -39,11 +44,11 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         from httpx import Response, Request
         mock_client.get.return_value = Response(200, request=Request("GET", "https://himalayas.app/jobs/api/search"),
             json={"jobs": [None, {"title": ""}, {**payload, "expiryDate": 1}, payload]})
-        with patch.object(jf.httpx, "AsyncClient", return_value=mock_client):
+        with patch.object(sources.httpx, "AsyncClient", return_value=mock_client), patch.object(sources.asyncio, "sleep", AsyncMock()):
             results = await jf.fetch_himalayas_jobs("python")
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0].posted_date.startswith("2026-10-27"))
-        self.assertEqual(results[0].salary, "USD 100 - USD 200 / hourly")
+        self.assertEqual(results[0].salary, "USD 100 - 200 / hourly")
         self.assertEqual(mock_client.get.call_args.kwargs["params"]["q"], "python")
         self.assertEqual(results[0].id, jf._parse_himalayas_job({**payload, "title": "Updated"}).id)
 
@@ -53,21 +58,20 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         async def slow():
             await gate.wait()
             return [fresh]
-        saves = AsyncMock()
+        db = MemoryDB({"jobs": [{**original.model_dump(), "fetched_at": datetime.now(timezone.utc).isoformat()}]})
         with patch.object(jf, "fetch_jobs_from_supabase", AsyncMock(return_value=[original])), \
              patch.object(jf, "fetch_remoteok_jobs", slow), \
-             patch.object(jf, "fetch_remotive_jobs", AsyncMock(return_value=[])), \
-             patch.object(jf, "fetch_himalayas_jobs", AsyncMock(return_value=[])), \
-             patch.object(jf, "fetch_jobicy_jobs", AsyncMock(return_value=[])), \
-             patch.object(jf, "fetch_adzuna_jobs", AsyncMock(return_value=[])), \
-             patch.object(jf, "fetch_jobspy_pakistan_jobs", AsyncMock(return_value=[])), \
-             patch.object(jf, "persist_jobs_to_supabase", saves):
+             patch.object(jf, "fetch_remotive_jobs", AsyncMock(return_value=Feed())), \
+             patch.object(jf, "fetch_himalayas_jobs", AsyncMock(return_value=Feed())), \
+             patch.object(jf, "fetch_jobicy_jobs", AsyncMock(return_value=Feed())), \
+             patch.object(jf, "fetch_adzuna_jobs", AsyncMock(return_value=Feed())), \
+             patch.object(jf, "_get_supabase_client", return_value=db):
             task = asyncio.create_task(jf.fetch_all_jobs())
             await asyncio.sleep(.01)
             self.assertEqual(jf.get_all_jobs()[0].title, original.title)
             gate.set()
             await task
-        self.assertEqual(saves.call_args.args[0][0].title, fresh.title)
+        self.assertEqual(db.rows["jobs"][0]["title"], fresh.title)
 
     async def test_stale_database_jobs_are_archived_but_tracker_links_survive(self):
         now = datetime.now(timezone.utc)
@@ -112,7 +116,7 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
              patch.object(em, "get_user_embedding", AsyncMock(return_value=[1., 0.])), \
              patch.object(em, "get_embeddings", AsyncMock(side_effect=ValueError("synthetic failure"))):
             ranked = await em.rank_jobs_for_user("local", {"skills": ["Python"]}, None, [job()])
-        self.assertEqual(ranked[0]["match_score"], 100)
+        self.assertEqual(ranked[0]["match_score"], 50)
         self.assertEqual(ranked[0]["match_method"], "keyword")
 
     async def test_embedding_http_contract_uses_configured_supported_model(self):

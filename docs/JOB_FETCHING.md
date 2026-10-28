@@ -1,149 +1,88 @@
-# Job fetching and freshness
+# Job fetching, search and personalized matching
 
-This document describes the implementation on main at `ba61f2b`, audited on **28 October 2026**. The improvement plan below is proposed work, not deployed behavior. There is no separate product requirements specification in this repository; the README and implementation establish the current scope: remote technology jobs, Pakistan listings when an importer supplies them, fast search, personalized matching, and a tracker with historical links.
+This guide describes the ingestion/search implementation. The earlier [28 October audit](job-freshness-audit-2026-10-28.json) and [startup sample](job-freshness-startup-2026-10-28.json) are historical evidence of the previous implementation, not current live totals.
 
-## Direct answers
+## Freshness and history
 
-| Question | Current answer |
-| --- | --- |
-| Does it use live jobs? | Yes. External provider APIs are queried on startup and during scheduled runs; searches use a cached snapshot. |
-| Does it fetch only recently posted jobs? | No. There is no shared publication-age cutoff, and providers expose different date meanings. |
-| Does it remove old batches? | There is no batch lifecycle. Stale observations are excluded on database reload; their rows remain stored in the cloud path. |
-| Is every displayed job still accepting applications? | Not established. Last observation is not employer availability. |
-| Does it refresh every six hours continuously? | Only while the API process is running. No durable scheduler or missed-run catch-up is configured. |
-| Does it continuously fetch Pakistan listings? | Not with the standard deployment. JSearch is disabled and JobSpy is not in deployed requirements. |
-| Is the design sufficient? | Useful MVP foundation; insufficient for a strict recent-jobs promise or a reliable unattended ingestion service. |
+- Search and matching require a parseable source publication/update date within `JOB_POSTED_MAX_AGE_DAYS` (default 30), a nonexpired `expires_at`, and no confirmed closed/unknown availability state.
+- These checks run **on every read**, not only during refresh. An expired listing disappears from counts, search, and matching even between runs.
+- The last observation must also be within `JOB_CACHE_MAX_AGE_DAYS` (default 14) when present. Publication age and observation age are separate clocks.
+- A newly returned old posting does not bypass the source-date window. Missing/unparseable source dates are retained in storage but excluded from discovery.
+- Source dates have different meanings: Himalayas `pubDate` means last updated. The UI says “dated or updated,” not “first published.” Employer availability can still change before a provider reports it.
+- Rows are retained for saved-job history. Neither the cloud coordinator nor the standalone scraper hard-deletes them. Archived detail views disable Apply.
+- The independent scraper's former `delete_old_jobs` entrypoint is now a compatibility no-op. User-entered tracker notes/status are unaffected.
 
-## Live evidence
+`first_seen_at` records the import-time observation baseline; existing rows received the migration default, so it must not be presented as their original publication date. `fetched_at` is the last successful importer observation. Provider identity, employment type, source attribution URL, restrictions, expiry and availability survive restarts.
 
-The [warmed production audit](job-freshness-audit-2026-10-28.json) started at **2026-10-28 13:59:57 UTC**. It made GET requests to the deployed API and SELECT queries against the configured public jobs table. No ingestion, mutation, or cleanup was triggered by the audit tool.
+## Refresh coordination and schedule
 
-| Measurement | Result |
-| --- | --- |
-| Served revision | `ba61f2b75e9572518bfcdf6c5e3038f093146451` |
-| Searchable jobs | 324 |
-| Source date within the previous day | 42 |
-| Source date within the previous seven days | 184 |
-| Source date older than 14 days | 107 |
-| Source date older than 30 days | 61 |
-| Oldest source date in search | 14 August 2025, Adzuna |
-| Stored database rows | 7,305 |
-| Database rows last observed more than 14 days earlier | 6,976 |
-| Those stale database IDs present in search | 0 |
-| Latest observation for all five cloud API sources | 28 October 2026, 13:58:45 UTC |
-| Latest stored Indeed / LinkedIn observations | 18 May 2026 |
-| Latest stored JSearch observation | 10 September 2026 |
+The API warms its snapshot from Supabase before declaring readiness when possible. It checks refresh state each minute while running; **that does not mean it calls providers each minute**.
 
-The data proves a recent successful observation/write for each of the five cloud API sources. It does not prove six-hour execution during unattended periods, completeness of every source query, or employer acceptance of every job. Numbers change on subsequent runs. Source dates are interpreted as UTC when the source supplied a date without a timezone; some are only day-precision. Himalayas documents `pubDate` as its last update time, so this is not universally original-publication age.
+A database RPC atomically claims a bounded global lease. `job_ingestion_state.sources` persists per-source attempts, next due times, last successes, outcome/count, errors and coverage caps. Attempts are reserved before requests, so a restart cannot immediately replay a consumed provider slot. `job_fetch_runs` stores durable run outcomes. A lease eventually expires if a process crashes.
 
-A [startup sample](job-freshness-startup-2026-10-28.json), taken earlier at 13:57 UTC, returned `status: healthy` with **zero cached/searchable jobs**, while fresh database rows existed. The later sample had 324. The first attempt also experienced an API read timeout. This shows a startup-readiness gap; it does not by itself prove which Render instance plan is used or why a particular restart occurred.
+Providers other than Himalayas use UTC six-hour slots; Himalayas uses one UTC daily slot because its feed refreshes daily. The GitHub workflow [job-refresh.yml](../.github/workflows/job-refresh.yml) runs at 00:23, 06:23, 12:23 and 18:23 UTC, and can also be manually dispatched. It makes public readiness requests to wake a sleeping API and waits for the due coordinator work to settle. It uses no Supabase credentials or privileged HTTP refresh endpoint. Both GitHub's run log and the database retain outcomes.
 
-### Searchable counts by source
+GitHub scheduled execution is best effort: delays, disabled Actions, service outages, and inactive-repository schedule suspension still matter. This is not a strict six-hour SLA. An awake API catches up due slots on its minute tick; a restarted API reads the durable budget. For an exact uptime/SLA requirement, move to a supervised always-running ingestion worker or a supported dedicated scheduler.
 
-| Source | Searchable | Source date older than 14 days |
-| --- | ---: | ---: |
-| Jobicy | 138 | 0 |
-| Himalayas | 96 | 54 |
-| RemoteOK | 63 | 37 |
-| Adzuna | 16 | 9 |
-| Remotive | 11 | 7 |
+The coordinator bounds total refresh duration (`JOB_REFRESH_TIMEOUT_SECONDS`, default 240) and provider traversal (`JOB_PROVIDER_MAX_PAGES`, default 5). It publishes newly fetched source records **after successful persistence**, retains other sources and prior data on failures, and never treats absence from a partial/capped feed as confirmed closure. Reads also enforce age/expiry against last-good data, so an outage does not keep jobs searchable indefinitely.
 
-An old source date does not establish that a job is closed. A freshly observed listing can legitimately remain open for months. A “recently posted only” product promise needs a separate publication-age policy and clear date semantics.
+## Provider behavior
 
-## Current execution flow
-
-The relevant code is [`main.py`](../backend/app/main.py), [`job_fetcher.py`](../backend/app/services/job_fetcher.py), [`job_normalization.py`](../backend/app/services/job_normalization.py), and the [Job schema](../backend/app/schemas/jobs.py).
-
-1. FastAPI startup creates a background `fetch_all_jobs()` task and starts an in-process APScheduler interval of six hours. Requests can be served before that first task completes. This interval is measured from scheduler startup, not fixed wall-clock batch times.
-2. `_load_persisted_jobs()` pages through Supabase in groups of 1,000, keeping rows whose `fetched_at` is at or after UTC now minus `JOB_CACHE_MAX_AGE_DAYS`. Rows that fail normalization are skipped. The location heuristic is applied.
-3. On an empty in-memory store, the loaded rows are published before waiting for external APIs. The database load itself can still be slow or fail, so the cache is not guaranteed ready immediately.
-4. `asyncio.gather(..., return_exceptions=True)` launches the configured API calls concurrently. Most calls have a 30-second HTTP timeout. A provider exception usually becomes an empty list plus a log message.
-5. The optional in-process JobSpy helper is attempted after the HTTP tasks. The standard production requirements do not install it, so it skips there. Installing it can make this phase slow; no whole-run deadline is configured.
-6. Location heuristics retain remote jobs and Pakistan jobs, reject some foreign onsite locations, and keep some ambiguous/unclassified listings. Remote-country and timezone eligibility for Pakistan are not fully evaluated.
-7. Fresh provider results take precedence over database rows with the same ID. Remaining database rows inside the last-seen window are merged in. Missing provider results do not immediately close previously cached jobs.
-8. Display results are deduplicated by trimmed, lowercased **title + company**. The first encountered result wins. This can collapse distinct locations or contracts with the same title and employer; it is not a canonical vacancy identity.
-9. A new in-memory dictionary replaces the previous snapshot. This replacement avoids partially building a visible list, but it is not a database transaction or a guarantee of persisted success.
-10. Freshly observed source IDs, including existing IDs, are upserted in groups of 200. Each gets a new `fetched_at`. Rows only reloaded from the database do not have their age renewed. Failed write groups are logged; no persisted run status or automatic retry queue records the partial failure.
-
-Search, counts, and matching use the in-memory store. A user search does not cause new provider calls. The running frontend does not subscribe to background refresh completion; navigate, reload, or run another search to obtain the current snapshot.
-
-### Date and status semantics
-
-| Field/concept | Meaning now | What it does not prove |
+| Provider | Discovery | Refresh / failure behavior |
 | --- | --- | --- |
-| `posted_date` | Provider date string; normalized numeric timestamp for Himalayas | Consistent original publication time across providers |
-| `jobs.fetched_at` | Most recent importer observation written to Supabase | New posting, open employer application, or successful full-provider traversal |
-| `JOB_CACHE_MAX_AGE_DAYS` | Which stored observations can be reloaded into active search | A maximum age from publication |
-| `Job.is_active` | True for current in-memory jobs; False on archived database fallback | Independently verified open/closed status |
-| `/api/health.status` | API process responds | Ready search data, working providers, or recent scheduled execution |
+| RemoteOK | One public feed; technology-role filtering | Six-hour UTC slots; bounded transient retries |
+| Remotive | **One broad public feed**, filtered locally | Six-hour UTC slots; no burst of 15 searches and no immediate retry storm |
+| Himalayas | Five targeted newest-first searches; sequential pages, stable guid IDs | Daily UTC slot; explicit expiry persisted; bounded partial coverage reported |
+| Jobicy | Canonical `/api/jobs` with sequential opaque cursor traversal | Six-hour slots; stored numeric IDs checked through `/api/jobs/status` in batches up to 100 |
+| Adzuna | GB/US/India remote-themed searches, newest first, provider age filter, bounded pages | Optional credentials; six-hour slots; no Pakistan query |
+| Indeed / LinkedIn | Separate optional manual importer | Not automatically fetched by the standard cloud requirements |
+| JSearch | Not enabled | Quota/operating-budget decision remains separate |
 
-Example: a job published in August and returned again today gets today's `fetched_at` and remains searchable. A job last seen 15 days ago is excluded when the next database reload rebuilds the cache, but its stored row is retained. An observation can cross the 14-day boundary between refreshes and remain visible until the next completed rebuild. Reads do not re-evaluate a per-job clock.
+Jobicy `closed` is archived; `unknown` is hidden without claiming confirmed closure. A provider status check is not a live probe of an employer's ATS. Older Himalayas rows without preserved provider identity are withheld until observed with the richer metadata. Expiry and missing-ID handling do not assume a capped first feed is a complete catalogue.
 
-## Provider coverage and operating constraints
+429 responses stop that request pass. Where an HTTP `Retry-After` survives to the coordinator, its later deadline extends the normal next-due time. Transport/5xx retries are bounded with jitter; Remotive uses one attempt per slot. Errors are stored as categories, not raw credential-bearing URLs.
 
-The scheduled cloud pass makes **28 potential HTTP requests**: RemoteOK 1 + Remotive 15 + Himalayas 5 + Jobicy 4 + Adzuna 3. Adzuna skips without credentials. A long-lived process normally schedules four passes per day, plus a startup pass on every restart. This is not a usage budget guarantee.
+Coverage remains intentionally bounded, not exhaustive. Capped/partial outcomes are visible through status; the UI does not claim every vacancy on each provider is present. Primary references: [Himalayas API](https://himalayas.app/api), [Remotive API](https://github.com/remotive-com/remote-jobs-api), [Jobicy API](https://jobicy.com/jobs-rss-feed).
 
-- **RemoteOK:** one feed request. Broad substring relevance checks inspect titles/tags/description; this can include false matches. No explicit age cutoff or closure revalidation is applied.
-- **Remotive:** 15 overlapping category/search requests, capped at 100 results each. The provider documents a public-feed delay and a low polling budget. Its guidance calls for about four fetches per day and blocks excessive per-minute use; the current concurrent burst needs consolidation. Prefer a cached broad fetch filtered locally, or a documented provider-agreed plan. [Official API guidance](https://github.com/remotive-com/remote-jobs-api).
-- **Himalayas:** five targeted queries, page 1, at most 20 per query, no explicit `sort=recent`. The provider documents daily-refreshed data and page/cursor traversal. `expiryDate` is checked only during parsing, then discarded by this schema. A previously saved job can be reloaded within its last-seen window after expiry. The provider also offers a single-job availability endpoint. Preserve expiry/identity and use these fields when reconciling availability. [Official API documentation](https://himalayas.app/api).
-- **Jobicy:** four capped requests to the existing v2 adapter. Current provider documentation describes cursor traversal and batch availability checks; neither is implemented here. A job disappearing from the provider's recent feed is not sufficient evidence of closure. [Official API documentation](https://jobicy.com/jobs-rss-feed).
-- **Adzuna:** first page for three remote-themed queries in GB, US, and India; no Pakistan query. The text heuristic can confuse “remote” mentions with an actual work-arrangement guarantee. API credentials and provider quotas control availability.
+## Search behavior
 
-These constraints mean six-hour application polling cannot promise jobs within six hours of an employer posting them. Follow source attribution/application-link requirements when changing adapters or display behavior; current source badges are labels rather than linked attribution on every card.
+- Multiple query terms must all appear across title, skill tags, company or description; quoted phrases remain phrases.
+- Matching uses word boundaries and selected aliases (`ML` / machine learning, `AI` / artificial intelligence, PostgreSQL / Postgres). `mail` does not match `email`, and `R` does not match arbitrary words containing r.
+- Title and tag hits rank ahead of description-only hits; source date and ID provide stable tie breaking.
+- Keyword, source, location, work arrangement, employment type and recent-date filters combine. They work in both All Jobs and Matched for Me.
+- All Jobs location filters search posting geography; personalized matching separately checks known candidate restrictions.
+- Default discovery covers at most the configured 30-day source-date window. The UI offers last 7/14 days as narrower views.
+- Same-title jobs at different locations/contracts remain distinct. Display duplicates with the same normalized title/company/location/employment type collapse; every observed provider ID remains stored for history.
 
-### Optional local scraper
+`GET /api/jobs` uses `job_type`; the compatibility `/api/jobs/search` route uses `type`. Both accept `posted_within_days`. The personalized route accepts the same filters as `/api/jobs`.
 
-[`backend/scripts/scrape_and_upload.py`](../backend/scripts/scrape_and_upload.py) is a separate manual importer for Indeed Pakistan searches and LinkedIn remote searches. It requires `python-jobspy` installed separately, working site access, and backend Supabase credentials. The scraper requests a seven-day window, but actual provider support and returned dates vary. It is not run by the deployment blueprint or a provisioned recurring job.
+## Matched for Me
 
-**Its current `delete_old_jobs(days=14)` call physically deletes all shared jobs rows older than the last-seen cutoff after a nonempty scrape, irrespective of source.** It does not check whether a tracker references the job. This conflicts with the cloud service's archive/history policy. Do not run it unchanged to implement retention. Unify the retention policy first; the read-only audit tool is safe to use instead. This audit did not execute the scraper or its cleanup.
+Each request reads the authenticated user's latest saved profile and latest parsed resume using that user's JWT/RLS client. Database work and keyword ranking run off the async event loop.
 
-Uploaded rows become visible when the backend next reloads persisted jobs. A redeploy triggers such a reload but should not become the normal ingestion mechanism.
+1. Use entered skills plus resume skills (or extracted technology terms from raw text if structured skills are absent). Candidate names, employer names, and arbitrary project titles are not match qualifications.
+2. Exclude known conflicts with candidate country and supported timezone restrictions. Unknown geography is not invented as a confirmed eligibility decision. A country is inferred from common country/city forms in the free-text location; this is not a complete geocoding system.
+3. Require a real skill overlap, or a target-role overlap for a role-only profile. Zero-overlap jobs are not promoted by embeddings.
+4. Weight technology coverage and target-role alignment. Adding an unrelated extra skill does not lower the same job's fit. Explicit experience requirements contribute a separate component; jobs requiring over two years beyond entered experience are excluded. Unstated requirements are not guessed from employment counts.
+5. Shortlist up to `MATCH_CANDIDATE_LIMIT` (default/max 100) deterministically. Both successful AI and fallback mode use this same bounded candidate set, so pagination does not switch between 100/200 candidates on provider failure.
+6. If embeddings succeed within the deadline, combine 80% profile fit with 20% semantic similarity. Otherwise return the profile-based ordering and label it **Profile Match**. Every result explains matching skills, other listed technologies, role fit and known experience/location considerations.
 
-## Assessment against the platform needs
+These percentages estimate relevance; they are not probabilities, certified ATS scores, or a claim the candidate satisfies every requirement. Location is free text and minimum-experience extraction recognizes common explicit phrasing only. Employers' eligibility requirements still need checking. Updating profile details changes scoring immediately; embedding cache keys include the current profile/resume content.
 
-| Platform need | Assessment |
+## Readiness and operations
+
+| Endpoint | Meaning |
 | --- | --- |
-| Fast search without per-user provider calls | Supported by shared in-memory snapshot; cold-start readiness remains a gap |
-| Live inputs from several boards | Confirmed for five cloud sources in the dated audit |
-| Strictly recent postings | Not implemented; last-seen TTL is a different policy |
-| Remove unavailable jobs promptly | Partial; ingestion-time Himalayas expiry check, no general closure reconciliation |
-| Avoid old search accumulation | Partial; 14-day last-seen reload window, no read-time expiry |
-| Preserve saved-job history | Cloud archive lookup supports it; standalone cleanup conflicts |
-| Continuous Pakistan coverage | No scheduled importer in the standard deployed dependencies |
-| Complete discovery | No; capped first pages, overlapping queries, title/company deduplication |
-| Correct candidate eligibility and role focus | Heuristic; country-restricted remote jobs and unrelated roles can remain |
-| Recover gracefully from partial failures | Some timeouts/isolation and last-seen fallback; no durable per-source run outcome or retry budget |
-| Operate across restarts or multiple instances | In-process scheduling and caches need a durable coordination design |
-| Explain freshness to users/operators | Source dates exist; last successful refresh/readiness are not exposed |
+| `/api/health` | Process response, revision, cached count, and readiness boolean |
+| `/api/ready` | 200 when the snapshot is usable; 503 while warming; includes sanitized ingestion state |
+| `/api/jobs/status` | Public sanitized source/run status and freshness windows |
+| `/api/jobs/stats` | Current searchable counts after read-time policy |
 
-## Prioritized improvements
+Job-list/matching requests return 503 during initial warming rather than presenting a completed empty result. The frontend retries warming responses and shows refresh/partial-source information. Historical data and expired jobs remain in storage; no unreviewed storage-retention deletion runs.
 
-These are recommended next changes and acceptance criteria, not hidden fixes in this documentation change.
+On a new installation run [supabase_setup.sql](../supabase_setup.sql). On an existing installation apply [20261028_ingestion.sql](../backend/migrations/20261028_ingestion.sql) before deploying this release. It adds metadata and private ingestion tables/RPC, preserves all existing user/jobs data, and grants the lease only to `service_role`. No administrative ingestion secret is sent to the browser or GitHub workflow.
 
-1. **Preserve history consistently and track availability.** Remove the standalone importer's unconditional shared-table deletion. Store `first_seen_at`, `last_seen_at`, provider publication/update time, `expires_at`, canonical identity, and an explicit active/closed/unverified state. Hide confirmed expired jobs promptly. A partial feed's missing ID must not be marked closed automatically. Tracker history must survive every importer and cleanup path.
-2. **Make scheduling and readiness observable.** Move ingestion to one durable scheduled worker with a lease/lock and per-source run records: start/end, success/failure/partial, counts, error category, and last success. Keep last-good data on failed runs. Add readiness distinct from liveness and show last refresh/partial-source state. Demonstrate execution through a restart and an unattended period; handle stale data without reporting a completed empty search at startup.
-3. **Respect budgets and improve discovery.** Consolidate Remotive requests; use per-provider concurrency and request budgets, retries with jitter/`Retry-After`, cached feeds, and bounded page/cursor traversal. Newest-first queries need explicit source-supported ordering. Bound whole-run duration. Demonstrate no duplicate scheduler runs and stable snapshot publication under 429s, timeouts, and partial persistence failures.
-4. **Agree the product freshness/eligibility policy.** Add an explicit recent-publication filter (for example configurable 7/30-day views) without equating an older open job with closure. Preserve unknown dates separately. Evaluate remote country/timezone restrictions, tighten role relevance with word-aware rules, and avoid merging distinct vacancies solely by title/company. Make the source's date meaning visible.
-5. **Restore local-market coverage deliberately.** Choose a sustainable Pakistan provider/importer and a supervised runner. Review credentials, operating budget and site access before enabling it. Do not re-enable JSearch solely because a key exists.
-6. **Define storage retention after archival works.** Agree how long to keep unreferenced archived jobs, protect referenced history or store a complete tracker snapshot, and provide a dry-run report before any deletion. There is currently no automated database size cap or retention schedule in the cloud path.
-
-## Operations and troubleshooting
-
-Use one API worker/instance while ingestion remains inside the API process. Each process would otherwise create its own scheduler and separate in-memory cache. Restarts reset the six-hour interval and launch an additional immediate fetch.
-
-If the Render service uses a Free instance, idle spin-down interrupts in-process scheduling. The current plan was not verified by this audit. Use infrastructure that actually executes the agreed schedule; configure a durable scheduled job or an always-running worker as part of the scheduler improvement, rather than assuming a web process is continuously alive. [Render's instance limitations](https://render.com/docs/free).
-
-| Symptom | Check |
-| --- | --- |
-| Healthy response, zero jobs | Startup warming or failed DB/provider load; compare later counts and logs; health is not readiness |
-| Fewer jobs after the release | Old last-seen rows are excluded and title/company duplicates collapse; inspect date/source counts |
-| Many old source dates | Current last-seen policy allows them when sources return them again |
-| No Indeed/LinkedIn jobs | Their importer is separate, not scheduled in production; check observation timestamps before running anything |
-| Remotive count unexpectedly small | Inspect HTTP 429s/invalid categories and reduce the concurrent burst; successful rows alone do not prove every query passed |
-| New local imports not in search | Wait for the next DB reload; the API does not watch database changes |
-| Search count differs from DB count | Expected from TTL, location filtering, deduplication, and retained history |
-| Lost older tracker detail | Check whether the standalone cleanup physically deleted its jobs row |
-| Provider request or batch write fails | Inspect logs; no durable run-status API exists yet |
+The [Render free-instance limitations](https://render.com/docs/free) still affect latency when waking a sleeping service. Multiple API processes have separate snapshots, but the shared database lease/budgets prevent duplicate provider runs; minute reloads bring each cache up to date. Only start one local fixture per test port.
 
 Read-only diagnostics, from `backend/`:
 
@@ -152,10 +91,6 @@ python scripts/audit_freshness.py
 python scripts/audit_freshness.py --database --output ../freshness-report.json
 ```
 
-The optional database audit uses the public anon client and selects only public job identifiers/source/dates; it never needs a service-role key. Ensure `backend/.env` refers to the same Supabase project as the API. The tool retries one failed GET to accommodate startup, never calls `fetch_all_jobs`, and returns a nonzero exit code if a requested API/database read fails. A successful audit says reads worked; it does not certify freshness or employer availability. Audits read multiple pages without a cross-request snapshot, so a concurrent refresh may affect totals.
+The optional database comparison reads the configured public jobs table; confirm it belongs to the same API. No job ingestion or mutation is triggered by this audit tool. It scans at most 50,000 rows and reports that cap. Multi-page reads are not a cross-request database snapshot.
 
-For scheduler investigation, inspect logs for `Starting full job fetch`, per-source failures/counts, `Total ... unique jobs cached`, persistence failures and final persistence counts. Compare source-specific stored `fetched_at` values over time. The current schema cannot reconstruct historical run outcomes, so one sample cannot certify schedule adherence.
-
-## Verification limits
-
-Existing regression tests verify stale observation exclusion, archival detail lookup, warm-data publication before slow providers, refreshed existing-ID persistence, malformed Himalayas record isolation and date normalization. They do not yet cover durable scheduling, source budget compliance, complete pagination, closure reconciliation, query-time expiry or the standalone scraper's destructive cleanup. See [VERIFICATION.md](../VERIFICATION.md) for broader local UI/API checks.
+For scheduled-run investigation, use the GitHub workflow log and the private `job_fetch_runs` / `job_ingestion_state` records. A healthy HTTP response alone does not certify all providers refreshed successfully. Test evidence and outstanding provider/environment limits belong in [VERIFICATION.md](../VERIFICATION.md).

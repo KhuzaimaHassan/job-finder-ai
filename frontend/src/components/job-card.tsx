@@ -77,11 +77,11 @@ export function JobCard({ job }: { job: Job }) {
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge variant="outline" className={`text-[11px] font-medium px-2 py-0.5 ${SOURCE_COLORS[job.source] || "bg-gray-500/15 text-gray-400"}`}>
-              {SOURCE_LABELS[job.source] || job.source}
+              <a href={safeExternalUrl(job.source_url || "") || ({himalayas:"https://himalayas.app",remotive:"https://remotive.com",remoteok:"https://remoteok.com",jobicy:"https://jobicy.com"} as Record<string,string>)[job.source]} target="_blank" rel="noopener noreferrer">{SOURCE_LABELS[job.source] || job.source}</a>
             </Badge>
             {job.match_score !== undefined && (
               <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-pink-500/15 text-pink-400 border-pink-500/30">
-                <span className="mr-1">✨</span> {job.match_score}% {job.match_method === "keyword" ? "Keyword Match" : "Match"}
+                <span className="mr-1">✨</span> {job.match_score}% {job.match_method === "keyword" ? "Profile Match" : "AI + Profile Match"}
               </Badge>
             )}
           </div>
@@ -155,6 +155,7 @@ export function JobCard({ job }: { job: Job }) {
             Apply →
           </a>}
         </div>
+        {job.match_reasons && <ul className="mt-3 space-y-1 text-xs leading-relaxed text-zinc-400" aria-label="Why this job matches">{job.match_reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       </div>
     </div>
   );
