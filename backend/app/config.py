@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Optional
 
 
@@ -19,6 +20,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     # Chat/completions model for ATS, cover letter, skill gap, interview prep
     GEMINI_AI_MODEL: Optional[str] = None  # defaults to ai_prompts.GEMINI_AI_MODEL_ID
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
+    MATCH_CANDIDATE_LIMIT: int = Field(100, ge=1, le=100)
+    MATCH_TIMEOUT_SECONDS: float = Field(20.0, gt=0, le=40)
+    JOB_CACHE_MAX_AGE_DAYS: int = Field(14, ge=1)
 
     # Frontend URL for CORS
     FRONTEND_URL: str = "http://localhost:3000"

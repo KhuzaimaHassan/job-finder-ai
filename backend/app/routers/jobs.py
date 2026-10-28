@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.schemas.jobs import Job, JobSearchResponse
-from app.services.job_fetcher import search_jobs, get_job_by_id, get_all_jobs
+from app.services.job_fetcher import search_jobs, get_job_by_id, get_all_jobs, get_archived_job_by_id
 from app.services.auth import get_current_user
 from app.services.supabase_client import get_supabase
 from app.services.embeddings import rank_jobs_for_user
@@ -26,7 +26,7 @@ def _decode_supabase_json_columns(row: dict) -> dict:
     return out
 
 
-def _matched_job_payload(job: Any, match_score: float) -> dict:
+def _matched_job_payload(job: Any, match_score: float, match_method: str = "keyword") -> dict:
     """JSON-serializable dict for the matched-jobs response."""
     if hasattr(job, "model_dump"):
         payload = job.model_dump(mode="json")
@@ -35,6 +35,7 @@ def _matched_job_payload(job: Any, match_score: float) -> dict:
     else:
         raise TypeError(f"Unexpected job type: {type(job)!r}")
     payload["match_score"] = float(match_score)
+    payload["match_method"] = match_method
     return payload
 
 
@@ -46,6 +47,7 @@ async def list_jobs(
     source: Optional[str] = Query(None, description="Source: adzuna, remoteok, remotive"),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Results per page"),
+    employment_type: Optional[str] = Query(None, description="fulltime, parttime, internship, contract"),
 ):
     """Search and filter jobs with pagination."""
     jobs, total = search_jobs(
@@ -55,6 +57,7 @@ async def list_jobs(
         source=source,
         page=page,
         per_page=per_page,
+        employment_type=employment_type,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -73,6 +76,7 @@ async def search_jobs_endpoint(
     source: Optional[str] = Query(None, description="Source filter"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    employment_type: Optional[str] = Query(None),
 ):
     """Alternative search endpoint with 'type' alias."""
     jobs, total = search_jobs(
@@ -82,6 +86,7 @@ async def search_jobs_endpoint(
         source=source,
         page=page,
         per_page=per_page,
+        employment_type=employment_type,
     )
     return JobSearchResponse(
         jobs=jobs,
@@ -100,7 +105,7 @@ async def job_stats():
     remote_count = 0
     for j in all_jobs:
         sources[j.source] = sources.get(j.source, 0) + 1
-        if j.job_type == "remote" or "remote" in j.location.lower():
+        if j.job_type == "remote":
             remote_count += 1
     return {
         "total_jobs": len(all_jobs),
@@ -179,7 +184,7 @@ async def matched_jobs(
 
     try:
         job_payloads = [
-            _matched_job_payload(item["job"], item["match_score"])
+            _matched_job_payload(item["job"], item["match_score"], item.get("match_method", "keyword"))
             for item in page_items
         ]
     except Exception as e:
@@ -201,7 +206,7 @@ async def matched_jobs(
 @router.get("/{job_id}", response_model=Job)
 async def get_job(job_id: str):
     """Get a single job by ID."""
-    job = get_job_by_id(job_id)
+    job = get_job_by_id(job_id) or await get_archived_job_by_id(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job

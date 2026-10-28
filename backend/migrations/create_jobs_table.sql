@@ -26,9 +26,11 @@ CREATE INDEX IF NOT EXISTS idx_jobs_fetched ON public.jobs (fetched_at DESC);
 -- Allow public read (the API reads jobs for all users)
 ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Allow public read" ON public.jobs;
 CREATE POLICY "Allow public read" ON public.jobs
     FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Allow service role insert/update" ON public.jobs;
 CREATE POLICY "Allow service role insert/update" ON public.jobs
     FOR ALL USING (auth.role() = 'service_role');
 

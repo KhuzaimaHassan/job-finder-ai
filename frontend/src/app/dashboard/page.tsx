@@ -10,8 +10,9 @@ import { JobCardSkeleton } from "@/components/job-card-skeleton";
 import { Navbar } from "@/components/navbar";
 import { AuthGuard } from "@/components/auth-guard";
 import { Sparkles, Globe } from "lucide-react";
+import { isAxiosError } from "axios";
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const [matchMode, setMatchMode] = useState<"all" | "matched">("all");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +23,7 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<{
     job_type?: string;
+    employment_type?: string;
     location?: string;
     source?: string;
   }>({});
@@ -38,6 +40,7 @@ export default function DashboardPage() {
         q: searchQuery || undefined,
         location: filters.location || undefined,
         job_type: filters.job_type || undefined,
+        employment_type: filters.employment_type || undefined,
         source: filters.source || undefined,
         page: page,
         per_page: 20,
@@ -57,7 +60,10 @@ export default function DashboardPage() {
       } catch (err: unknown) {
         if (!active) return;
         console.error("Failed to fetch jobs:", err);
-        if (err instanceof Error && (err as any).response?.status === 400 && matchMode === "matched") {
+        setJobs([]);
+        setTotal(0);
+        setHasMore(false);
+        if (isAxiosError(err) && err.response?.status === 400 && matchMode === "matched") {
           setError("Please add skills to your profile or upload a resume to see matched jobs.");
         } else {
           setError("Failed to load jobs. Make sure the backend is running.");
@@ -85,7 +91,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         {/* Gradient orbs background */}
         <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -148,9 +154,9 @@ export default function DashboardPage() {
           </section>
 
         {/* Results */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
+        <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
           {/* Result count */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-6" aria-live="polite">
             <p className="text-sm text-gray-400">
               {loading ? "Searching..." : `${total} jobs found`}
             </p>
@@ -248,6 +254,10 @@ export default function DashboardPage() {
         </main>
       </div>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function DashboardPage() {
+  return <AuthGuard><DashboardPageContent /></AuthGuard>;
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
+import type { InterviewQ } from "@/types";
 import { postAiInterviewPrep } from "@/lib/api";
 import { Loader2, MessageSquare, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -12,7 +14,7 @@ interface InterviewPrepProps {
 
 export function InterviewPrep({ jobTitle, jobDescription, userSkills }: InterviewPrepProps) {
   const [loading, setLoading] = useState(false);
-  const [questions, setQuestions] = useState<any[] | null>(null);
+  const [questions, setQuestions] = useState<InterviewQ[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
@@ -26,14 +28,8 @@ export function InterviewPrep({ jobTitle, jobDescription, userSkills }: Intervie
         user_skills: userSkills.join(", ")
       });
       setQuestions(data.questions);
-    } catch (err: any) {
-      let errorMessage = "Failed to generate interview prep";
-      if (err?.response?.data?.detail) {
-        errorMessage = typeof err.response.data.detail === "string" 
-          ? err.response.data.detail 
-          : JSON.stringify(err.response.data.detail);
-      }
-      setError(errorMessage);
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, "Failed to generate interview prep"));
     } finally {
       setLoading(false);
     }
@@ -44,8 +40,8 @@ export function InterviewPrep({ jobTitle, jobDescription, userSkills }: Intervie
   };
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-purple-400" /> Interview Prep
         </h3>
@@ -76,7 +72,7 @@ export function InterviewPrep({ jobTitle, jobDescription, userSkills }: Intervie
 
       {questions && (
         <div className="space-y-3 mt-4">
-          {questions.map((q: any, idx: number) => (
+          {questions.map((q, idx: number) => (
             <div key={idx} className="border border-zinc-800 rounded-lg bg-zinc-950 overflow-hidden">
               <button
                 onClick={() => toggleAccordion(idx)}

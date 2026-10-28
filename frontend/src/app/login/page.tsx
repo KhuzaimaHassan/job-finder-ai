@@ -4,10 +4,13 @@ import { useAuth } from "@/contexts/auth-context";
 import { BriefcaseBusiness } from "lucide-react";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function LoginPage() {
   const { signInWithGoogle, user, loading } = useAuth();
   const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     if (user && !loading) {
@@ -16,15 +19,15 @@ export default function LoginPage() {
   }, [user, loading, router]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4">
-      <div className="relative mb-8 mt-[-10vh]">
+    <main id="main-content" className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 px-4 py-10">
+      <div className="relative mb-6 sm:mb-8">
         <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 opacity-20 blur-xl"></div>
         <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl">
           <BriefcaseBusiness className="h-10 w-10 text-indigo-400" />
         </div>
       </div>
 
-      <div className="z-10 w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8 shadow-2xl backdrop-blur-sm">
+      <div className="z-10 w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5 sm:p-8 shadow-2xl backdrop-blur-sm">
         <div className="mb-8 text-center">
           <h1 className="mb-2 text-3xl font-bold tracking-tight text-zinc-100">
             Welcome back
@@ -35,8 +38,8 @@ export default function LoginPage() {
         </div>
 
         <button
-          onClick={signInWithGoogle}
-          disabled={loading}
+          onClick={async () => { setError(null); setSigningIn(true); try { await signInWithGoogle(); } catch { setError("Could not start sign-in. Please try again."); setSigningIn(false); } }}
+          disabled={loading || signingIn}
           className="group relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 font-medium text-zinc-200 transition-all hover:border-zinc-600 hover:bg-zinc-700 disabled:opacity-50"
         >
           <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-12deg)_translateX(-100%)] group-hover:duration-1000 group-hover:[transform:skew(-12deg)_translateX(100%)]">
@@ -61,13 +64,14 @@ export default function LoginPage() {
             />
             <path d="M1 1h22v22H1z" fill="none" />
           </svg>
-          <span className="relative">Continue with Google</span>
+          <span className="relative">{signingIn ? "Connecting…" : "Continue with Google"}</span>
         </button>
         
         <div className="mt-8 text-center text-sm text-zinc-500">
-          By signing in, you agree to our Terms of Service and Privacy Policy.
+          Sign in with Google to keep your resume and application tracker in your account.
         </div>
       </div>
-    </div>
+      {error && <p role="alert" className="mt-4 max-w-md text-center text-sm text-red-300">{error}</p>}
+    </main>
   );
 }

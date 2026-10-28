@@ -6,15 +6,22 @@ import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { ResumeImprover } from "@/components/ai/resume-improver";
+import { apiErrorMessage } from "@/lib/errors";
 
-export default function ResumePage() {
+interface ParsedResume {
+  raw_text?: string;
+  skills?: string[];
+  experience?: { title?: string; company?: string; duration?: string }[];
+}
+
+function ResumePageContent() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [parsedData, setParsedData] = useState<any | null>(null);
+  const [parsedData, setParsedData] = useState<ParsedResume | null>(null);
   const [existingResumeText, setExistingResumeText] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -25,18 +32,15 @@ export default function ResumePage() {
         if (res.data && res.data.parsed) {
           setExistingResumeText(res.data.raw_text);
         }
-      } catch (err) {
-        // No existing resume
-      } finally {
-        setLoading(false);
+      } catch {
+        setError("Could not load your saved resume. Refresh the page to try again.");
       }
     };
     fetchExisting();
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selected = e.target.files[0];
+  const selectFile = (selected: File) => {
+      if (uploading) return;
       if (selected.type !== "application/pdf") {
         setError("Only PDF files are supported");
         setFile(null);
@@ -51,7 +55,9 @@ export default function ResumePage() {
       setError(null);
       setSuccess(false);
       setParsedData(null);
-    }
+  };
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) selectFile(e.target.files[0]);
   };
 
   const handleUpload = async () => {
@@ -59,12 +65,14 @@ export default function ResumePage() {
 
     setUploading(true);
     setError(null);
+    setSyncWarning(null);
     
     const formData = new FormData();
     formData.append("file", file);
 
     try {
       const { data } = await api.post(`/api/resume/upload`, formData, {
+        timeout: 120_000,
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -72,28 +80,30 @@ export default function ResumePage() {
       
       setSuccess(true);
       setParsedData(data);
+      setExistingResumeText(data.raw_text ?? null);
       
       // Auto-sync profile with resume data
       try {
         await api.post(`/api/profile/sync-from-resume`);
       } catch (syncErr) {
         console.error("Profile sync failed", syncErr);
+        setSyncWarning("Your resume was saved, but your profile could not be synced. You can update it on the Profile page.");
       }
       
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.response?.data?.detail || "Failed to upload and parse resume");
+      setError(apiErrorMessage(err, "Failed to upload and parse resume"));
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <Navbar />
         
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
+        <main id="main-content" className="w-full min-w-0 max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Resume Upload</h1>
             <p className="text-zinc-400">
@@ -110,23 +120,15 @@ export default function ResumePage() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                  const dataTransferFile = e.dataTransfer.files[0];
-                  if (dataTransferFile.type === "application/pdf") {
-                    setFile(dataTransferFile);
-                    setError(null);
-                  } else {
-                    setError("Only PDF files are supported");
-                  }
-                }
+                if (e.dataTransfer.files?.[0]) selectFile(e.dataTransfer.files[0]);
               }}
             >
               {file ? (
-                <div className="flex flex-col items-center">
+                <div className="flex w-full min-w-0 flex-col items-center">
                   <FileText className="h-12 w-12 text-indigo-400 mb-4" />
-                  <p className="text-lg font-medium text-zinc-200">{file.name}</p>
+                  <p className="max-w-full break-all text-center text-base font-medium text-zinc-200">{file.name}</p>
                   <p className="text-sm text-zinc-500 mb-6">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  <div className="flex gap-4">
+                  <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
                     <button 
                       onClick={() => setFile(null)}
                       className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white transition-colors"
@@ -178,10 +180,12 @@ export default function ResumePage() {
             {success && (
               <div className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3">
                 <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-                <p className="text-sm text-emerald-300">Resume successfully parsed and skills extracted. Your profile has been updated!</p>
+                <p className="text-sm text-emerald-300">Resume successfully parsed and skills extracted.</p>
               </div>
             )}
           </div>
+
+          {syncWarning && <p role="status" className="mb-6 text-sm text-amber-300">{syncWarning}</p>}
 
           {parsedData && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -202,7 +206,7 @@ export default function ResumePage() {
                 <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5">
                   <h3 className="text-sm font-medium text-zinc-400 mb-3 uppercase tracking-wider">Experience</h3>
                   <div className="space-y-4">
-                    {parsedData.experience?.map((exp: any, i: number) => (
+                    {parsedData.experience?.map((exp, i: number) => (
                       <div key={i} className="border-l-2 border-zinc-800 pl-3">
                         <p className="font-medium text-sm text-zinc-200">{exp.title}</p>
                         <p className="text-xs text-zinc-500">{exp.company} • {exp.duration}</p>
@@ -216,11 +220,15 @@ export default function ResumePage() {
 
           {/* AI Resume Improver */}
           {(parsedData?.raw_text || existingResumeText) && (
-            <ResumeImprover resumeText={parsedData?.raw_text || existingResumeText} />
+            <ResumeImprover key={parsedData?.raw_text || existingResumeText} resumeText={(parsedData?.raw_text || existingResumeText)!} />
           )}
 
         </main>
       </div>
-    </AuthGuard>
+    </>
   );
+}
+
+export default function ResumePage() {
+  return <AuthGuard><ResumePageContent /></AuthGuard>;
 }

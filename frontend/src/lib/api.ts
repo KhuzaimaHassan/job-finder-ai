@@ -15,7 +15,18 @@ export const api = axios.create({
   timeout: 45000, // 45 seconds to allow for Gemini PDF parsing
 });
 
-// The auth token is now set directly on api.defaults by auth-context.tsx
+// Read the current session for every request, including the first request after
+// a full-page reload and requests made after an automatic token refresh.
+api.interceptors.request.use(async (config) => {
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (session?.access_token) {
+    config.headers.set("Authorization", `Bearer ${session.access_token}`);
+  } else {
+    config.headers.delete("Authorization");
+  }
+  return config;
+});
 
 export async function searchJobs(
   params: JobSearchParams
@@ -92,11 +103,12 @@ export async function postAiCoverLetter(body: {
 
 export async function postAiSkillGap(
   user_skills: string,
-  job_required_skills: string
+  job_required_skills: string,
+  job_description: string = ""
 ): Promise<SkillGapResult> {
   const { data } = await api.post<SkillGapResult>(
     "/api/ai/skill-gap",
-    { user_skills, job_required_skills },
+    { user_skills, job_required_skills, job_description },
     { timeout: AI_TIMEOUT_MS }
   );
   return data;

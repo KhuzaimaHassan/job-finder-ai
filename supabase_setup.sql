@@ -53,7 +53,7 @@ begin
   values (new.id, new.raw_user_meta_data->>'full_name', new.email);
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 -- Drop trigger if exists, then create
 drop trigger if exists on_auth_user_created on auth.users;
@@ -80,3 +80,46 @@ drop policy if exists "Users can manage own applications" on public.applications
 create policy "Users can manage own applications" on public.applications for all using (auth.uid() = user_id);
 drop policy if exists "Service role full access applications" on public.applications;
 create policy "Service role full access applications" on public.applications for all using (auth.role() = 'service_role');
+
+-- Shared job cache (user-specific data stays in the RLS-protected tables above).
+create table if not exists public.jobs (
+  id text primary key,
+  title text not null,
+  company text not null,
+  location text not null default '',
+  salary text,
+  description text not null default '',
+  url text not null default '',
+  source text not null default '',
+  posted_date text,
+  tags text[] default '{}',
+  job_type text,
+  fetched_at timestamptz not null default now()
+);
+create index if not exists idx_jobs_fetched on public.jobs (fetched_at desc);
+alter table public.jobs enable row level security;
+drop policy if exists "Allow public read" on public.jobs;
+create policy "Allow public read" on public.jobs for select using (true);
+drop policy if exists "Allow service role insert/update" on public.jobs;
+create policy "Allow service role insert/update" on public.jobs for all using (auth.role() = 'service_role');
+
+-- Private PDF objects: each authenticated user owns only their UUID folder.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('resumes', 'resumes', false, 10485760, array['application/pdf'])
+on conflict (id) do update set public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Read own resume PDFs" on storage.objects;
+create policy "Read own resume PDFs" on storage.objects for select to authenticated
+using (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "Upload own resume PDFs" on storage.objects;
+create policy "Upload own resume PDFs" on storage.objects for insert to authenticated
+with check (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "Update own resume PDFs" on storage.objects;
+create policy "Update own resume PDFs" on storage.objects for update to authenticated
+using (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text)
+with check (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "Delete own resume PDFs" on storage.objects;
+create policy "Delete own resume PDFs" on storage.objects for delete to authenticated
+using (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text);

@@ -94,4 +94,5 @@ async def health_check():
     return {
         "status": "healthy",
         "jobs_cached": len(get_all_jobs()),
+        "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
     }

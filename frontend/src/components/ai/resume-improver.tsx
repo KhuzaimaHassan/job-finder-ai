@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
 import { postAiResumeImprove } from "@/lib/api";
 import { Loader2, Sparkles, CheckCircle2, Circle } from "lucide-react";
 import { toast } from "sonner";
@@ -29,14 +30,8 @@ export function ResumeImprover({ resumeText }: ResumeImproverProps) {
       setImprovements(data.improvements);
       setCompleted(new Set());
       toast.success("AI analysis complete!");
-    } catch (err: any) {
-      let msg = "Failed to analyze resume";
-      if (err?.response?.data?.detail) {
-        msg = typeof err.response.data.detail === "string" 
-          ? err.response.data.detail 
-          : JSON.stringify(err.response.data.detail);
-      }
-      toast.error(msg);
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, "Failed to analyze resume"));
     } finally {
       setLoading(false);
     }
@@ -52,7 +47,7 @@ export function ResumeImprover({ resumeText }: ResumeImproverProps) {
   };
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 md:p-8 mt-8">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 sm:p-6 md:p-8 mt-8">
       <div className="flex items-center gap-3 mb-4">
         <Sparkles className="w-6 h-6 text-indigo-400" />
         <h2 className="text-xl font-bold text-white">AI Resume Improver</h2>
@@ -91,7 +86,7 @@ export function ResumeImprover({ resumeText }: ResumeImproverProps) {
       {improvements && (
         <div className="space-y-4">
           <p className="text-zinc-300 text-sm mb-6">
-            Here are 5 specific improvements for a <span className="font-semibold text-indigo-400">{targetRole || "General"}</span> role:
+            Here are {improvements.length} specific improvements for a <span className="font-semibold text-indigo-400">{targetRole || "General"}</span> role:
           </p>
           <div className="space-y-3">
             {improvements.map((imp, idx) => {

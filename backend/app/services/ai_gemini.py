@@ -8,7 +8,8 @@ import re
 from typing import Any
 
 from app.config import settings
-from app.services.ai_prompts import GEMINI_AI_MODEL_ID
+from app.services.ai_prompts import GEMINI_AI_MODEL_ID, UNTRUSTED_INPUT_RULES
+from app.services.learning_resources import for_skills
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,22 @@ def _strip_code_fence(text: str) -> str:
 def _parse_json_object(text: str) -> dict[str, Any]:
     t = _strip_code_fence(text)
     try:
-        return json.loads(t)
+        data = json.loads(t)
     except json.JSONDecodeError:
         m = re.search(r"\{[\s\S]*\}", t)
         if m:
-            return json.loads(m.group())
-        raise
+            data = json.loads(m.group())
+        else:
+            raise
+    if not isinstance(data, dict):
+        raise ValueError("AI response must be a JSON object")
+    return data
+
+
+def _strings(value: Any) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError("AI response must contain lists of strings")
+    return [item.strip() for item in value if item.strip()]
 
 
 def _require_gemini() -> None:
@@ -56,7 +67,7 @@ async def _generate_text(system_instruction: str, user_content: str) -> str:
     genai.configure(api_key=settings.GEMINI_API_KEY)
     model = genai.GenerativeModel(
         model_name=_model_name(),
-        system_instruction=system_instruction,
+        system_instruction=system_instruction + "\n" + UNTRUSTED_INPUT_RULES,
     )
     response = await model.generate_content_async(user_content)
     if not response or not response.text:
@@ -79,8 +90,8 @@ async def run_ats_score(resume_text: str, job_description: str) -> dict[str, Any
     score = max(0, min(100, score))
     return {
         "score": score,
-        "matching_keywords": list(data.get("matching_keywords") or [])[:50],
-        "missing_keywords": list(data.get("missing_keywords") or [])[:50],
+        "matching_keywords": _strings(data.get("matching_keywords", []))[:50],
+        "missing_keywords": _strings(data.get("missing_keywords", []))[:50],
         "verdict": str(data.get("verdict", "")).strip() or "No verdict returned.",
     }
 
@@ -104,32 +115,20 @@ async def run_cover_letter(
     return await _generate_text(COVER_LETTER_SYSTEM, user)
 
 
-async def run_skill_gap(user_skills: str, job_required_skills: str) -> dict[str, Any]:
+async def run_skill_gap(user_skills: str, job_required_skills: str, job_description: str = "") -> dict[str, Any]:
     from app.services.ai_prompts import SKILL_GAP_SYSTEM, SKILL_GAP_USER_TEMPLATE
 
     user = SKILL_GAP_USER_TEMPLATE.format(
         user_skills=user_skills or "(none listed)",
         job_required_skills=job_required_skills or "(infer from context)",
+        job_description=job_description[:_MAX_JOB_CHARS] or "(not provided)",
     )
     raw = await _generate_text(SKILL_GAP_SYSTEM, user)
     data = _parse_json_object(raw)
-    courses_raw = data.get("courses") or []
-    courses: list[dict[str, Any]] = []
-    for c in courses_raw[:12]:
-        if not isinstance(c, dict):
-            continue
-        courses.append(
-            {
-                "name": str(c.get("name", "")).strip() or "Course",
-                "platform": str(c.get("platform", "")).strip() or "Online",
-                "url": str(c.get("url", "")).strip() or "https://www.google.com/search?q=course",
-                "free": bool(c.get("free", True)),
-            }
-        )
-    return {
-        "missing_skills": list(data.get("missing_skills") or [])[:30],
-        "courses": courses,
-    }
+    raw_missing = data.get("missing_skills") or []
+    missing = _strings(raw_missing)[:30]
+    return {"missing_skills": missing, "courses": for_skills(missing)}
+
 
 
 async def run_interview_prep(
@@ -158,8 +157,9 @@ async def run_interview_prep(
                 "answer_structure": str(q.get("answer_structure", "")).strip(),
             }
         )
-    while len(out) < 5:
-        out.append({"question": "", "answer_structure": ""})
+    out = [q for q in out if q["question"] and q["answer_structure"]]
+    if not out:
+        raise ValueError("No usable interview questions returned")
     return out[:5]
 
 async def run_resume_improve(resume_text: str, target_role: str) -> list[str]:
@@ -175,6 +175,8 @@ async def run_resume_improve(resume_text: str, target_role: str) -> list[str]:
     improvements_raw = data.get("improvements") or []
     out: list[str] = []
     for imp in improvements_raw[:5]:
-        if isinstance(imp, str):
+        if isinstance(imp, str) and imp.strip():
             out.append(imp.strip())
+    if not out:
+        raise ValueError("No usable resume improvements returned")
     return out[:5]

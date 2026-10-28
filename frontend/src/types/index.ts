@@ -10,7 +10,10 @@ export interface Job {
   posted_date: string | null;
   tags: string[];
   job_type: string | null;
+  employment_type?: string | null;
   match_score?: number;
+  match_method?: "semantic" | "keyword";
+  is_active?: boolean;
 }
 
 export interface JobSearchResponse {
@@ -25,6 +28,7 @@ export interface JobSearchParams {
   q?: string;
   location?: string;
   job_type?: string;
+  employment_type?: string;
   source?: string;
   page?: number;
   per_page?: number;
@@ -80,6 +84,6 @@ export interface Application {
   company: string;
   status: 'Saved' | 'Applied' | 'Interview' | 'Offer' | 'Rejected';
   notes: string;
-  applied_date: string;
+  applied_date: string | null;
   updated_at: string;
 }

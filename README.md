@@ -3,7 +3,7 @@
 # 🤖 Job Finder AI 
 ### Your Intelligent Career Companion
 
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Supabase](https://img.shields.io/badge/Supabase-Database_%26_Auth-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Google Gemini](https://img.shields.io/badge/Google_Gemini-AI_Powered-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
@@ -55,7 +55,7 @@ We selected our stack to optimize for **type-safety, raw performance, and AI int
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | React, Next.js 15 (App Router), TypeScript | Server-Side Rendering, SEO, Type-safe components |
+| **Frontend** | React, Next.js 16 (App Router), TypeScript | Server-Side Rendering, SEO, Type-safe components |
 | **Styling & UI** | Tailwind CSS v4, shadcn/ui, Lucide | Dark-mode glassmorphism, responsive native layouts |
 | **Backend** | Python 3.12, FastAPI, Pydantic, Uvicorn | High-concurrency async API, strict schema validation |
 | **Artificial Intelligence** | Google Gemini 2.5 Flash | Fast, token-efficient LLM inference and PDF parsing |
@@ -131,7 +131,7 @@ job-finder-ai/
 We've made bootstrapping the environment as frictionless as possible.
 
 ### Prerequisites
-- Node.js (v18+)
+- Node.js (v20.9+, Node 22 recommended)
 - Python (v3.11+)
 - API Keys: [Supabase](https://supabase.com/), [Google AI Studio](https://aistudio.google.com/), [Adzuna](https://developer.adzuna.com/)
 
@@ -168,11 +168,60 @@ npm run dev
 ```
 *Web App available at: `http://localhost:3000`*
 
+### Reliability and local verification
+
+PDF extraction uses the pinned `pdfplumber` dependency in the backend requirements.
+Resumes must contain selectable text; image-only/scanned PDFs need OCR before upload.
+Uploading a replacement preserves earlier successfully saved resume versions and uses
+a separate storage object, so a failed save cannot delete the previous resume.
+
+Job search only includes database rows observed within `JOB_CACHE_MAX_AGE_DAYS`
+(default 14). Fresh provider results update existing IDs and their observation times.
+Older rows are retained for historical tracker links and displayed as archived, with
+the Apply link disabled. A provider failure does not renew the age of its cached rows.
+The cloud scheduler does not refresh Indeed/LinkedIn through JobSpy: the optional
+local scraper must be run separately on a suitable machine. JSearch remains disabled
+until its quota and operating budget are deliberately reviewed.
+
+Matching uses `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`). It ranks at
+most `MATCH_CANDIDATE_LIMIT` keyword-shortlisted candidates semantically per request,
+using async batched requests, content-aware caches, and a bounded timeout. If the
+provider fails, the response consistently uses keyword scores and labels them in the UI.
+
+Run the backend regression suite without cloud writes:
+
+```bash
+cd backend
+python -m unittest tests.test_reliability -v
+```
+
+For browser regression checks, `tests.browser_app` is a **local-only fixture**, with
+disposable in-memory storage and simulated authentication/AI. Never deploy it.
+It exercises the real application routers, PDF extraction, and frontend flows:
+
+```bash
+# Terminal 1, from backend/ (bind loopback only)
+python -m uvicorn tests.browser_app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2, from frontend/: set these process environment variables first
+# NEXT_PUBLIC_API_URL=http://localhost:8000
+# NEXT_PUBLIC_SUPABASE_URL=http://localhost:8000
+# NEXT_PUBLIC_SUPABASE_ANON_KEY=local-disposable-anon
+npm run build
+npm start
+```
+
+Open `http://localhost:3000`; Continue with Google uses the local fixture instead of
+a real Google account. `http://localhost:8000/_test/resume.pdf` supplies a synthetic
+resume for upload checks. Restart the fixture to discard its data. For a real deployment,
+rebuild using the real frontend environment values: Next.js embeds these public values
+at build time. Production must continue using `app.main:app` as its backend entrypoint.
+
 ---
 
 ## 🚢 Deployment Strategy
 
-The application is fully configured for CI/CD via GitHub integrations.
+The hosted frontend and backend deploy through their existing GitHub integrations when changes are merged to `main`. Run the local checks above before merging. The frontend `X-App-Revision` response header and backend `/api/health` revision expose the deployed Git SHA for release verification.
 
 - **Frontend (Vercel):** Connect your fork to Vercel. Ensure `Root Directory` is set to `frontend`. Populate the environment variables. Pushes to `main` auto-deploy to edge networks.
 - **Backend (Render):** Connect your fork to Render via a Blueprint deployment. Render natively reads `render.yaml` to provision a Python web service, install dependencies, and expose the dynamic `$PORT`.

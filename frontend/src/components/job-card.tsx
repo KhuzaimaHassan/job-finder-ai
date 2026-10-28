@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type Job } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { safeExternalUrl } from "@/lib/utils";
 
 const SOURCE_COLORS: Record<string, string> = {
   adzuna: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
@@ -65,6 +66,7 @@ function timeAgo(dateStr: string | null): string {
 }
 
 export function JobCard({ job }: { job: Job }) {
+  const applyUrl = safeExternalUrl(job.url);
   return (
     <div className="group relative rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-5 hover:border-purple-500/30 hover:bg-white/[0.04] transition-all duration-300 flex flex-col h-full">
       {/* Hover glow */}
@@ -72,14 +74,14 @@ export function JobCard({ job }: { job: Job }) {
 
       <div className="relative z-10 flex flex-col flex-1">
         {/* Header — source + time */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge variant="outline" className={`text-[11px] font-medium px-2 py-0.5 ${SOURCE_COLORS[job.source] || "bg-gray-500/15 text-gray-400"}`}>
               {SOURCE_LABELS[job.source] || job.source}
             </Badge>
             {job.match_score !== undefined && (
               <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 bg-pink-500/15 text-pink-400 border-pink-500/30">
-                <span className="mr-1">✨</span> {job.match_score}% Match
+                <span className="mr-1">✨</span> {job.match_score}% {job.match_method === "keyword" ? "Keyword Match" : "Match"}
               </Badge>
             )}
           </div>
@@ -89,7 +91,7 @@ export function JobCard({ job }: { job: Job }) {
         </div>
 
         {/* Title */}
-        <h3 className="text-[15px] font-semibold text-white leading-snug mb-1.5 line-clamp-2 group-hover:text-purple-300 transition-colors">
+        <h3 className="break-words text-base font-semibold text-white leading-snug mb-2 line-clamp-2 group-hover:text-purple-300 transition-colors">
           {job.title}
         </h3>
 
@@ -144,14 +146,14 @@ export function JobCard({ job }: { job: Job }) {
           >
             Details &amp; AI
           </Link>
-          <a
-            href={job.url}
+          {applyUrl && <a
+            href={applyUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="flex-1 text-center py-2.5 rounded-lg text-sm font-medium bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white transition-all duration-200 shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20"
           >
             Apply →
-          </a>
+          </a>}
         </div>
       </div>
     </div>

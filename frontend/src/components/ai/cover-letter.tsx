@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/errors";
 import { postAiCoverLetter } from "@/lib/api";
 import { Loader2, Copy, Check } from "lucide-react";
 
@@ -28,8 +29,8 @@ export function CoverLetter({ jobTitle, company, jobDescription, resumeText }: C
     try {
       const data = await postAiCoverLetter({ resume_text: resumeText, job_title: jobTitle, company, job_description: jobDescription });
       setLetter(data.cover_letter);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to generate cover letter");
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, "Failed to generate cover letter"));
     } finally {
       setLoading(false);
     }
@@ -44,8 +45,8 @@ export function CoverLetter({ jobTitle, company, jobDescription, resumeText }: C
   };
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="text-lg font-semibold">AI Cover Letter</h3>
         {!letter && !loading && (
           <button

@@ -1,10 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useState } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import axios from "axios";
-import { api } from "@/lib/api";
 
 interface AuthContextType {
   user: User | null;
@@ -22,45 +20,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      // Set default auth header for axios and api if session exists
-      if (session?.access_token) {
-        axios.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
-        api.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
-      } else {
-        delete axios.defaults.headers.common["Authorization"];
-        delete api.defaults.headers.common["Authorization"];
-      }
-      
-      setLoading(false);
-    });
-
-    // Listen for auth changes
+    let active = true;
+    let receivedAuthEvent = false;
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      receivedAuthEvent = true;
       setSession(session);
       setUser(session?.user ?? null);
-      
-      // Update axios and api default header
-      if (session?.access_token) {
-        axios.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
-        api.defaults.headers.common["Authorization"] = `Bearer ${session.access_token}`;
-      } else {
-        delete axios.defaults.headers.common["Authorization"];
-        delete api.defaults.headers.common["Authorization"];
-      }
+      setLoading(false);
     });
-
-    return () => subscription.unsubscribe();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!active || receivedAuthEvent) return;
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    }).catch(() => {
+      if (active && !receivedAuthEvent) setLoading(false);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         // Redirect directly to /dashboard.
@@ -69,17 +55,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         redirectTo: `${window.location.origin}/dashboard`,
       },
     });
+    if (error) throw error;
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
   };
 
   return (
     <AuthContext.Provider
       value={{ user, session, loading, signInWithGoogle, signOut }}
     >
-      {children}
+      {loading ? (
+        <div role="status" aria-label="Loading session" className="flex min-h-screen items-center justify-center bg-zinc-950">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-800 border-t-indigo-500" />
+        </div>
+      ) : <Fragment key={user?.id ?? "signed-out"}>{children}</Fragment>}
     </AuthContext.Provider>
   );
 }
