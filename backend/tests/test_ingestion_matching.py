@@ -66,6 +66,20 @@ class IngestionMatchingTests(IsolatedAsyncioTestCase):
     def test_talent_pools_are_not_presented_as_vacancies(self):
         self.assertFalse(jf._is_relevant_job(job(title="Backend Developer - Talent Pool")))
 
+    def test_target_roles_exclude_support_boilerplate_and_flag_unverified_degree(self):
+        profile={"skills":["Python","Data Science"],"target_roles":["Data Scientist","Machine Learning Engineer"],"location":"Karachi","experience_years":0}
+        unrelated=job(title="Cloud Support Engineer",description="Our company works on Data Science and Python")
+        self.assertIsNone(embeddings._profile_match(profile,None,unrelated))
+        research=job(title="Machine Learning Researcher (MSc or PhD)",description="Python research work")
+        result=embeddings._profile_match(profile,None,research)
+        self.assertIsNotNone(result)
+        self.assertTrue(any("degree" in reason for reason in result["match_reasons"]))
+
+    def test_global_synonyms_and_title_commas_do_not_duplicate_a_vacancy(self):
+        jf.publish_snapshot([job("a",title="Software Engineer, AI Tasks",location="Remote",job_type="remote"),
+                             job("b",title="Software Engineer AI Tasks",location="Worldwide",job_type="remote")])
+        self.assertEqual(len(jf._job_store),1)
+
     async def test_match_profile_updates_reorder_experience_and_exclude_foreign_jobs(self):
         roles=[job("junior",title="Junior Python Engineer",description="Python. 1 year of experience"),
                job("senior",title="Senior Python Engineer",description="Python. 8 years of experience"),

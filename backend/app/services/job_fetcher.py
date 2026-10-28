@@ -73,8 +73,13 @@ def publish_snapshot(jobs):
     # Include location and contract in vacancy identity; source IDs remain stored.
     unique = {}
     for job in sorted(jobs, key=lambda j: (j.posted_date or "", j.id), reverse=True):
+        geo = job.location
+        if job.job_type == "remote" and geo.lower() in ("remote", "worldwide", "anywhere", "global"):
+            geo = "global"
+        title = re.sub(r"[,;:–—-]", " ", job.title)
         key = tuple(re.sub(r"\s+", " ", value.lower()).strip() for value in
-                    (job.title, job.company, job.location, job.employment_type or ""))
+                    (title, job.company, geo, job.employment_type or "")) + (
+                        tuple(sorted(job.location_restrictions)), tuple(sorted(job.timezone_restrictions)))
         unique.setdefault(key, job)
     _job_store = {job.id: job for job in unique.values()}
     _cache_loaded = True

@@ -123,6 +123,8 @@ def _profile_match(profile, resume, job):
         words = re.findall(r"[A-Za-z][A-Za-z+#.]*", role)
         return 100 * sum(term_matches(job.title, word) for word in words) / max(1, len(words))
     role_score = max((role_alignment(role) for role in roles), default=0)
+    if roles and role_score < 50:
+        return None
     if (terms and not hits) or (not terms and role_score == 0):
         return None
     from app.services.job_fetcher import _extract_tags
@@ -145,6 +147,8 @@ def _profile_match(profile, resume, job):
         reasons.append(f"Experience: {years} years entered; listing asks for {required}+")
     if profile.get("location"):
         reasons.append("No known conflict with your entered location; check employer eligibility")
+    if re.search(r"\b(?:PhD|MSc|doctorate|master['’]?s)\b", f"{job.title} {job.description}", re.I):
+        reasons.append("Review postgraduate-degree requirements; your profile does not verify them")
     score = sum(weight * value for weight, value in parts) / sum(weight for weight, _ in parts)
     return {"job": job, "match_score": round(score, 1), "match_method": "keyword",
             "matching_skills": hits, "match_reasons": reasons}
