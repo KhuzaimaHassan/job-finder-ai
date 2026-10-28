@@ -1,0 +1,39 @@
+{
+  "checked_at_utc": "2026-10-28T13:57:07.434898+00:00",
+  "api_url": "https://job-finder-ai-backend.onrender.com",
+  "health": {
+    "status": "healthy",
+    "jobs_cached": 0,
+    "revision": "ba61f2b75e9572518bfcdf6c5e3038f093146451"
+  },
+  "search": {
+    "count": 0,
+    "parseable_dates": 0,
+    "within_1_day": 0,
+    "within_7_days": 0,
+    "older_than_14_days": 0,
+    "older_than_30_days": 0,
+    "future_dates": 0,
+    "oldest_date": null,
+    "newest_date": null,
+    "reported_total": 0
+  },
+  "sources": {},
+  "database": {
+    "rows_read": 7304,
+    "scan_limit_reached": false,
+    "last_seen_cutoff_utc": "2026-10-14T13:57:07.434898+00:00",
+    "older_than_cutoff": 6976,
+    "stale_ids_in_search": 0,
+    "newest_fetched_at_by_source": {
+      "adzuna": "2026-10-28T09:52:06.667813+00:00",
+      "himalayas": "2026-10-28T09:52:06.667813+00:00",
+      "indeed": "2026-05-18T19:06:38.934850+00:00",
+      "jobicy": "2026-10-28T09:52:06.667813+00:00",
+      "jsearch": "2026-09-10T08:05:01.015710+00:00",
+      "linkedin": "2026-05-18T18:56:30.737741+00:00",
+      "remoteok": "2026-10-28T09:52:06.667813+00:00",
+      "remotive": "2026-10-28T09:52:06.667813+00:00"
+    }
+  }
+}
