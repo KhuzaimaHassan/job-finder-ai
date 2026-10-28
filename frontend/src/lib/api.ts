@@ -104,11 +104,12 @@ export async function postAiCoverLetter(body: {
 export async function postAiSkillGap(
   user_skills: string,
   job_required_skills: string,
-  job_description: string = ""
+  job_description: string = "",
+  resume_text: string = ""
 ): Promise<SkillGapResult> {
   const { data } = await api.post<SkillGapResult>(
     "/api/ai/skill-gap",
-    { user_skills, job_required_skills, job_description },
+    { user_skills, job_required_skills, job_description, resume_text },
     { timeout: AI_TIMEOUT_MS }
   );
   return data;
@@ -116,6 +117,7 @@ export async function postAiSkillGap(
 
 
 export async function postAiInterviewPrep(body: {
+  resume_text?: string;
   job_title: string;
   job_description: string;
   user_skills: string;

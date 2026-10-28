@@ -104,8 +104,8 @@ export function AICopilotDrawer({ job, userSkills, resumeText, requiredSkills }:
               </p>
               <ATSScore jobDescription={job.description} resumeText={resumeText} />
               <CoverLetter jobTitle={job.title} company={job.company} jobDescription={job.description} resumeText={resumeText} />
-              <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} jobDescription={job.description} />
-              <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} />
+              <SkillsGapAnalysis userSkills={userSkills} jobRequiredSkills={requiredSkills} jobDescription={job.description} resumeText={resumeText} />
+              <InterviewPrep jobTitle={job.title} jobDescription={job.description} userSkills={userSkills} resumeText={resumeText} />
             </>
           )}
         </div>

@@ -44,6 +44,7 @@ class CoverLetterResponse(BaseModel):
 
 
 class SkillGapRequest(BaseModel):
+    resume_text: str = Field("", max_length=60000)
     user_skills: str = Field("", max_length=8000)
     job_required_skills: str = Field("", max_length=8000)
     job_description: str = Field("", max_length=16000)
@@ -62,6 +63,7 @@ class SkillGapResponse(BaseModel):
 
 
 class InterviewPrepRequest(BaseModel):
+    resume_text: str = Field("", max_length=60000)
     job_title: str = ""
     job_description: str = Field(..., min_length=10)
     user_skills: str = ""
@@ -77,6 +79,8 @@ class InterviewPrepResponse(BaseModel):
 
 
 def _gemini_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, ai_gemini.AIServiceError):
+        return HTTPException(status_code=exc.status_code, detail=str(exc))
     msg = str(exc)
     if "GEMINI_API_KEY" in msg or "not configured" in msg.lower():
         return HTTPException(
@@ -99,7 +103,7 @@ async def ats_score(
             body.job_description,
         )
         return ATSScoreResponse(**result)
-    except ValueError as e:
+    except (ValueError, ai_gemini.AIServiceError) as e:
         raise _gemini_http(e) from e
     except Exception as e:
         logger.error(f"ATS score failed: {e}")
@@ -121,7 +125,7 @@ async def cover_letter(
             body.job_description,
         )
         return CoverLetterResponse(cover_letter=text)
-    except ValueError as e:
+    except (ValueError, ai_gemini.AIServiceError) as e:
         raise _gemini_http(e) from e
     except Exception as e:
         logger.error(f"Cover letter failed: {e}")
@@ -140,13 +144,14 @@ async def skill_gap(
             body.user_skills,
             body.job_required_skills,
             body.job_description,
+            body.resume_text,
         )
         courses = [CourseSuggestion(**c) for c in result["courses"]]
         return SkillGapResponse(
             missing_skills=result["missing_skills"],
             courses=courses,
         )
-    except ValueError as e:
+    except (ValueError, ai_gemini.AIServiceError) as e:
         raise _gemini_http(e) from e
     except Exception as e:
         logger.error(f"Skill gap failed: {e}")
@@ -165,13 +170,14 @@ async def interview_prep(
             body.job_title,
             body.job_description,
             body.user_skills,
+            body.resume_text,
         )
         questions = [
             InterviewQuestionItem(question=q["question"], answer_structure=q["answer_structure"])
             for q in items
         ]
         return InterviewPrepResponse(questions=questions)
-    except ValueError as e:
+    except (ValueError, ai_gemini.AIServiceError) as e:
         raise _gemini_http(e) from e
     except Exception as e:
         logger.error(f"Interview prep failed: {e}")
@@ -197,7 +203,7 @@ async def resume_improve(
             body.target_role,
         )
         return ResumeImproveResponse(improvements=items)
-    except ValueError as e:
+    except (ValueError, ai_gemini.AIServiceError) as e:
         raise _gemini_http(e) from e
     except Exception as e:
         logger.error(f"Resume improve failed: {e}")

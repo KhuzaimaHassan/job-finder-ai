@@ -3,8 +3,10 @@ Gemini client helpers for Week 3 AI features. Prompts live in ai_prompts.py.
 """
 
 import json
+import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from app.config import settings
@@ -16,6 +18,14 @@ logger = logging.getLogger(__name__)
 # Truncate long inputs to stay within model context (chars, conservative)
 _MAX_RESUME_CHARS = 24_000
 _MAX_JOB_CHARS = 16_000
+
+
+class AIServiceError(Exception):
+    """A provider failure with a safe, actionable client message."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _strip_code_fence(text: str) -> str:
@@ -63,13 +73,24 @@ def _model_name() -> str:
 async def _generate_text(system_instruction: str, user_content: str) -> str:
     _require_gemini()
     import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted, TooManyRequests, DeadlineExceeded, ServiceUnavailable
 
     genai.configure(api_key=settings.GEMINI_API_KEY)
     model = genai.GenerativeModel(
         model_name=_model_name(),
-        system_instruction=system_instruction + "\n" + UNTRUSTED_INPUT_RULES,
+        system_instruction=(system_instruction + "\n" + UNTRUSTED_INPUT_RULES
+                            + "\nCurrent date (UTC): " + datetime.now(timezone.utc).date().isoformat()
+                            + ". Evaluate career dates relative to this date, not your training cutoff."),
     )
-    response = await model.generate_content_async(user_content)
+    try:
+        async with asyncio.timeout(100):
+            response = await model.generate_content_async(user_content)
+    except (ResourceExhausted, TooManyRequests) as exc:
+        raise AIServiceError(429, "AI provider quota reached. Try again after the quota resets, or ask the site owner to review Gemini limits.") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise AIServiceError(504, "The AI provider took too long. Please try again later.") from exc
+    except ServiceUnavailable as exc:
+        raise AIServiceError(503, "The AI provider is temporarily unavailable. Please try again later.") from exc
     if not response or not response.text:
         raise ValueError("Empty response from Gemini")
     return response.text.strip()
@@ -115,13 +136,14 @@ async def run_cover_letter(
     return await _generate_text(COVER_LETTER_SYSTEM, user)
 
 
-async def run_skill_gap(user_skills: str, job_required_skills: str, job_description: str = "") -> dict[str, Any]:
+async def run_skill_gap(user_skills: str, job_required_skills: str, job_description: str = "", resume_text: str = "") -> dict[str, Any]:
     from app.services.ai_prompts import SKILL_GAP_SYSTEM, SKILL_GAP_USER_TEMPLATE
 
     user = SKILL_GAP_USER_TEMPLATE.format(
         user_skills=user_skills or "(none listed)",
         job_required_skills=job_required_skills or "(infer from context)",
         job_description=job_description[:_MAX_JOB_CHARS] or "(not provided)",
+        resume_text=resume_text[:_MAX_RESUME_CHARS] or "(not provided)",
     )
     raw = await _generate_text(SKILL_GAP_SYSTEM, user)
     data = _parse_json_object(raw)
@@ -135,6 +157,7 @@ async def run_interview_prep(
     job_title: str,
     job_description: str,
     user_skills: str,
+    resume_text: str = "",
 ) -> list[dict[str, str]]:
     from app.services.ai_prompts import INTERVIEW_PREP_SYSTEM, INTERVIEW_PREP_USER_TEMPLATE
 
@@ -143,6 +166,7 @@ async def run_interview_prep(
         job_title=job_title or "Role",
         job_description=job_description,
         user_skills=user_skills or "(not specified)",
+        resume_text=resume_text[:_MAX_RESUME_CHARS] or "(not provided)",
     )
     raw = await _generate_text(INTERVIEW_PREP_SYSTEM, user)
     data = _parse_json_object(raw)

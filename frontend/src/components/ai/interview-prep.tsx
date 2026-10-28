@@ -10,9 +10,10 @@ interface InterviewPrepProps {
   jobTitle: string;
   jobDescription: string;
   userSkills: string[];
+  resumeText: string;
 }
 
-export function InterviewPrep({ jobTitle, jobDescription, userSkills }: InterviewPrepProps) {
+export function InterviewPrep({ jobTitle, jobDescription, userSkills, resumeText }: InterviewPrepProps) {
   const [loading, setLoading] = useState(false);
   const [questions, setQuestions] = useState<InterviewQ[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,8 @@ export function InterviewPrep({ jobTitle, jobDescription, userSkills }: Intervie
       const data = await postAiInterviewPrep({
         job_title: jobTitle,
         job_description: jobDescription,
-        user_skills: userSkills.join(", ")
+        user_skills: userSkills.join(", "),
+        resume_text: resumeText
       });
       setQuestions(data.questions);
     } catch (err: unknown) {

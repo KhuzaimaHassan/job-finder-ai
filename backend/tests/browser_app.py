@@ -71,7 +71,12 @@ async def parsed(text):
 resume.parse_resume_with_gemini = parsed
 
 
+ai_quota_exhausted = False
+
+
 async def ats(*_args):
+    if ai_quota_exhausted:
+        raise ai_gemini.AIServiceError(429, "AI provider quota reached. Try again after the quota resets, or ask the site owner to review Gemini limits.")
     return {"score": 85, "matching_keywords": ["Python", "SQL"], "missing_keywords": ["Docker"],
             "verdict": "Local fixture: strong Python and SQL alignment."}
 
@@ -147,6 +152,13 @@ def pdf():
 def fail(enabled: bool):
     if enabled: db.fail_insert.add("resumes")
     else: db.fail_insert.discard("resumes")
+    return {"enabled": enabled}
+
+
+@app.post("/_test/ai-quota/{enabled}")
+def ai_quota(enabled: bool):
+    global ai_quota_exhausted
+    ai_quota_exhausted = enabled
     return {"enabled": enabled}
 
 
