@@ -128,3 +128,9 @@ panels, expands the interview answer, clears results when changing jobs, and
 displays the controlled quota failure with a usable retry button. Earlier console
 entries from rebuilding the running frontend and replacing the fixture session
 were resolved by restarting the frontend and signing into the disposable provider.
+
+Post-deployment verification on 29 October found that the configured sign-in flow
+lands on `ai-jobfinder.vercel.app`, while backend CORS allowed only the previous
+production alias. Both frontends returned the same deployed revision. The exact
+new origin is added to the allowlist; a regression verifies both aliases accept
+authenticated-request preflights and unrelated Vercel origins remain rejected.
