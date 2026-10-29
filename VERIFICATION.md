@@ -151,3 +151,24 @@ publishing that inference; matching/missing requirements remain visible.
 All 46 backend regressions pass. Targeted live synthetic checks returned a valid
 five-question object distinguishing development assistants from LangGraph and an
 ATS result preserving the MSc/PhD gap while neutralizing enrollment-status prose.
+
+## Scheduled refresh checkpoint recovery — 29 October 2026
+
+Run https://github.com/KhuzaimaHassan/job-finder-ai/actions/runs/40881388571 failed
+at 13:25 UTC. It recorded RemoteOK `RemoteProtocolError`, Adzuna/Jobicy
+`Coordinator interrupted`, Remotive success, and 609 cached jobs. Inspection found
+that a source's final database checkpoint ran outside its exception handler;
+failure there escaped the task and canceled unfinished sibling providers.
+
+Recovery adds bounded opt-in transport retries for safe database operations,
+serialized source checkpoints, sibling isolation, independent run-history/lease
+finalization, and merging availability into the latest published snapshot. The
+workflow prints unbuffered diagnostics naming failed sources and retains its
+failure criteria. Quota reservations and next-due slots are preserved.
+
+All 51 backend tests pass. New fault-injection coverage checks a committed upsert
+whose response is lost (no duplicate), an exhausted checkpoint retry while other
+providers finish, serialized state writes, lease release despite history failure,
+and concurrent publication during an awaited availability update. These tests
+exercise the real coordinator with disposable storage; they do not claim a fresh
+production provider cycle succeeded before its next allowed slot.

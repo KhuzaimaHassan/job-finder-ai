@@ -17,7 +17,7 @@ jobs:
       - name: Wake API and verify due ingestion completes
         shell: bash
         run: |
-          python3 - <<'PY'
+          python3 -u - <<'PY'
           import json, time, urllib.request
           url = 'https://job-finder-ai-backend.onrender.com/api/ready'
           last = None
@@ -28,8 +28,9 @@ jobs:
                       last = json.load(response)
                   if last.get('ready') and not last.get('running') and last.get('sources'):
                       print(json.dumps(last, indent=2))
-                      if last.get('error') or any(s.get('status') == 'failed' for s in last['sources'].values()):
-                          raise SystemExit('A provider refresh failed; inspect the saved source/run status')
+                      failed = {name: info.get('error') for name, info in last['sources'].items() if info.get('status') == 'failed'}
+                      if last.get('error') or failed:
+                          raise SystemExit('Refresh verification failed: ' + json.dumps({'coordinator': last.get('error'), 'sources': failed}))
                       break
               except (OSError, ValueError) as error:
                   print('API warming/read failed:', type(error).__name__)

@@ -24,7 +24,16 @@ Providers other than Himalayas use UTC six-hour slots; Himalayas uses one UTC da
 
 GitHub scheduled execution is best effort: delays, disabled Actions, service outages, and inactive-repository schedule suspension still matter. This is not a strict six-hour SLA. An awake API catches up due slots on its minute tick; a restarted API reads the durable budget. For an exact uptime/SLA requirement, move to a supervised always-running ingestion worker or a supported dedicated scheduler.
 
-The coordinator bounds total refresh duration (`JOB_REFRESH_TIMEOUT_SECONDS`, default 240) and provider traversal (`JOB_PROVIDER_MAX_PAGES`, default 5). It publishes newly fetched source records **after successful persistence**, retains other sources and prior data on failures, and never treats absence from a partial/capped feed as confirmed closure. Reads also enforce age/expiry against last-good data, so an outage does not keep jobs searchable indefinitely.
+The coordinator bounds the provider-work phase (`JOB_REFRESH_TIMEOUT_SECONDS`, default 240) and provider traversal (`JOB_PROVIDER_MAX_PAGES`, default 5); initial database reads and finalization add overhead outside that phase. It publishes newly fetched source records **after successful persistence**, retains other sources and prior data on failures, and never treats absence from a partial/capped feed as confirmed closure. Reads also enforce age/expiry against last-good data, so an outage does not keep jobs searchable indefinitely.
+
+Snapshot reads, provider-ID upserts and idempotent status updates retry transport
+failures up to three times with bounded backoff. Lease claims and run inserts are
+not automatically replayed. Source checkpoints are serialized to prevent older
+JSON maps overwriting newer outcomes. An exhausted checkpoint retry does not
+cancel other providers; finalization retries the complete state. Run-history
+storage and lease release are attempted separately, with failures surfaced in
+status. Availability updates merge into the latest snapshot after awaited writes
+so another provider's newly published jobs are retained.
 
 ## Provider behavior
 
@@ -94,3 +103,10 @@ python scripts/audit_freshness.py --database --output ../freshness-report.json
 The optional database comparison reads the configured public jobs table; confirm it belongs to the same API. No job ingestion or mutation is triggered by this audit tool. It scans at most 50,000 rows and reports that cap. Multi-page reads are not a cross-request database snapshot.
 
 For scheduled-run investigation, use the GitHub workflow log and the private `job_fetch_runs` / `job_ingestion_state` records. A healthy HTTP response alone does not certify all providers refreshed successfully. Test evidence and outstanding provider/environment limits belong in [VERIFICATION.md](../VERIFICATION.md).
+
+The verification workflow keeps genuine provider failures red and prints source
+error categories without waiting for buffered output. Re-running verification
+does not clear historical failed-source state or bypass durable provider
+cooldowns. After a failed attempt, the failed state remains visible until the
+next eligible source refresh completes; an old failed Actions run remains in
+GitHub's history after a fix.

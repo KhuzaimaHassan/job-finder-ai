@@ -11,6 +11,7 @@ from app.config import settings
 from app.services import job_fetcher as jf
 from app.services.job_policy import parse_date, searchable
 from app.services.job_sources import Feed, jobicy_status
+from app.services.db_retry import db_call
 
 logger = logging.getLogger(__name__)
 _lock = asyncio.Lock()
@@ -21,10 +22,6 @@ def status():
     return {**_status, "ready": jf.cache_ready(), "jobs_cached": len(jf.get_all_jobs()),
             "max_posted_age_days": settings.JOB_POSTED_MAX_AGE_DAYS,
             "max_unseen_age_days": settings.JOB_CACHE_MAX_AGE_DAYS}
-
-
-async def db_call(callback):
-    return await asyncio.to_thread(callback)
 
 
 def due(source, sources, now):
@@ -101,11 +98,11 @@ async def refresh_jobs():
             acquired = bool((await db_call(lambda: client.rpc("claim_job_refresh", {"p_owner": owner, "p_seconds": 600}).execute())).data)
             if not acquired:
                 return jf.get_all_jobs()
-            rows = (await db_call(lambda: client.table("job_ingestion_state").select("sources").eq("id", "global").execute())).data
+            rows = (await db_call(lambda: client.table("job_ingestion_state").select("sources").eq("id", "global").execute(), attempts=3)).data
             sources = dict(rows[0].get("sources") or {}) if rows else {}
             _status = {**_status, "sources": sources, "error": None}
             if not _status.get("last_completed_at"):
-                runs = (await db_call(lambda: client.table("job_fetch_runs").select("completed_at").order("started_at", desc=True).limit(1).execute())).data
+                runs = (await db_call(lambda: client.table("job_fetch_runs").select("completed_at").order("started_at", desc=True).limit(1).execute(), attempts=3)).data
                 if runs:
                     _status["last_completed_at"] = runs[0].get("completed_at")
             if any(item.get("last_success_at") for item in sources.values()):
@@ -124,10 +121,18 @@ async def refresh_jobs():
             for name, (_, hours) in selected.items():
                 sources[name] = {**sources.get(name, {}), "status": "running", "last_attempt_at": now.isoformat(),
                                  "next_due_at": datetime.fromtimestamp((int(now.timestamp()) // (hours * 3600) + 1) * hours * 3600, timezone.utc).isoformat()}
-            await db_call(lambda: client.table("job_ingestion_state").update({"sources": sources}).eq("id", "global").eq("lease_owner", owner).execute())
+            await db_call(lambda: client.table("job_ingestion_state").update({"sources": sources}).eq("id", "global").eq("lease_owner", owner).execute(), attempts=3)
             await db_call(lambda: client.table("job_fetch_runs").insert({"id": run_id, "started_at": now.isoformat(), "status": "running", "sources": sources}).execute())
             run_started = True
             _status = {**_status, "running": True, "sources": sources}
+            checkpoint_lock = asyncio.Lock()
+
+            async def checkpoint():
+                # Entire JSON source maps must arrive in order, or an older
+                # concurrent write can replace a newer provider's outcome.
+                async with checkpoint_lock:
+                    snapshot = dict(sources)
+                    await db_call(lambda: client.table("job_ingestion_state").update({"sources": snapshot}).eq("id", "global").eq("lease_owner", owner).execute(), attempts=3)
 
             async def run_source(name, fetch):
                 try:
@@ -136,17 +141,19 @@ async def refresh_jobs():
                     await jf.persist_jobs_to_supabase(list(fresh.values()))
                     # Publish only after successful persistence, keep every other
                     # provider's last-good data even when this pass is partial.
-                    existing = {job.id: job for job in jf._job_store.values()}
-                    existing.update(fresh)
                     checks = getattr(feed, "availability", {})
                     for availability in ("active", "closed", "unknown"):
                         ids = [job_id for job_id, value in checks.items() if value == availability]
                         if ids:
                             value = availability
-                            await db_call(lambda ids=ids, value=value: client.table("jobs").update({"availability": value}).in_("id", ids).execute())
-                            for job_id in ids:
-                                if job_id in existing:
-                                    existing[job_id] = existing[job_id].model_copy(update={"availability": value})
+                            await db_call(lambda ids=ids, value=value: client.table("jobs").update({"availability": value}).in_("id", ids).execute(), attempts=3)
+                    # Merge only after awaited writes, so another provider's
+                    # intervening publication cannot be replaced by a stale map.
+                    existing = {job.id: job for job in jf._job_store.values()}
+                    existing.update(fresh)
+                    for job_id, value in checks.items():
+                        if job_id in existing:
+                            existing[job_id] = existing[job_id].model_copy(update={"availability": value})
                     jf.publish_snapshot(existing.values())
                     error = getattr(feed, "error", None)
                     outcome = {**sources[name], "status": "partial" if error or getattr(feed, "capped", False) else "success",
@@ -168,7 +175,12 @@ async def refresh_jobs():
                             pass
                 sources[name] = outcome
                 outcomes[name] = outcome
-                await db_call(lambda: client.table("job_ingestion_state").update({"sources": dict(sources)}).eq("id", "global").eq("lease_owner", owner).execute())
+                try:
+                    await checkpoint()
+                except Exception as exc:
+                    # Finalization retries the complete state. A failed status
+                    # checkpoint must not cancel unrelated provider requests.
+                    logger.warning("Provider %s checkpoint failed: %s; will finalize complete state", name, type(exc).__name__)
 
             try:
                 async with asyncio.timeout(settings.JOB_REFRESH_TIMEOUT_SECONDS):
@@ -194,15 +206,21 @@ async def refresh_jobs():
         finally:
             ended = datetime.now(timezone.utc).isoformat()
             if client and acquired:
+                for name in selected:
+                    if sources[name].get("status") == "running":
+                        sources[name] = {**sources[name], "status": "failed", "error": "Coordinator interrupted"}
+                if run_started:
+                    run_status = "success" if all(item.get("status") == "success" for item in outcomes.values()) and len(outcomes) == len(selected) else "partial"
+                    try:
+                        await db_call(lambda: client.table("job_fetch_runs").update({"completed_at": ended, "status": run_status, "sources": sources}).eq("id", run_id).execute(), attempts=3)
+                    except Exception:
+                        logger.exception("Could not finalize job refresh history")
+                        _status["error"] = "Refresh history persistence failed"
+                # Always attempt lease release, even if run-history storage fails.
                 try:
-                    for name in selected:
-                        if sources[name].get("status") == "running":
-                            sources[name] = {**sources[name], "status": "failed", "error": "Coordinator interrupted"}
-                    if run_started:
-                        run_status = "success" if all(item.get("status") == "success" for item in outcomes.values()) and len(outcomes) == len(selected) else "partial"
-                        await db_call(lambda: client.table("job_fetch_runs").update({"completed_at": ended, "status": run_status, "sources": sources}).eq("id", run_id).execute())
-                    await db_call(lambda: client.table("job_ingestion_state").update({"sources": sources, "lease_until": ended, "lease_owner": None, "updated_at": ended}).eq("id", "global").eq("lease_owner", owner).execute())
+                    await db_call(lambda: client.table("job_ingestion_state").update({"sources": sources, "lease_until": ended, "lease_owner": None, "updated_at": ended}).eq("id", "global").eq("lease_owner", owner).execute(), attempts=3)
                 except Exception:
-                    logger.exception("Could not finalize job refresh; lease expires automatically")
+                    logger.exception("Could not finalize ingestion state; lease expires automatically")
+                    _status["error"] = "Ingestion state persistence failed; lease expires automatically"
             _status = {**_status, "running": False, "last_completed_at": ended if run_started else _status.get("last_completed_at"),
                        "sources": sources if acquired else _status.get("sources", {})}
