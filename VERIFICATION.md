@@ -96,3 +96,35 @@ With explicit authorization, the live profile was filled from the public portfol
 Live validation follow-up: the first production browser run exposed high scores for principal-level short-description postings and unresolved city-only geography. A follow-up adds conservative seniority floors, city/country handling and excludes unresolved specific geographies from personalized matches. It also removes talent-pool posts from vacancy discovery. The workflow wait budget is extended to nine minutes inside its ten-minute job limit, since the first manually dispatched check ended before deployment plus initial ingestion finished. Missing cached Jobicy IDs are checked in a bounded, rotating batch; freshly returned feed IDs are already active and do not need redundant status calls.
 
 The corrected scheduled workflow rerun succeeded. A further live list check showed unrelated support roles admitted by boilerplate skill mentions; target-role alignment is now required when roles are saved, postgraduate requirements are explicitly flagged as unverified, and title-comma/global-location synonyms are deduplicated without merging distinct restrictions. These cases have regression coverage.
+
+## Live AI Co-Pilot follow-up
+
+With the user's uploaded resume, all four tools returned live results for Askable's
+AI coding role and Xperteez's ML research role; the resume improver also returned
+five suggestions. This exposed quality defects despite successful requests:
+past 2025/2026 experience was described as future-dated, cover letters asserted
+unverified availability, interview questions conflated LLM use with coding
+assistants, and a coding-assistant gap linked to a basic Python tutorial.
+
+The follow-up adds the current UTC date and explicit evidence rules to provider
+instructions, sends full resume evidence to skill-gap/interview endpoints, uses
+a specific reviewed coding-assistant resource ahead of incidental language matches,
+and labels compatibility percentages as estimates. Existing API callers can omit
+the new resume fields. Regression coverage checks the provider context, resume
+handoff, unrelated resource rejection and duplicate resource removal. Prompt rules
+reduce unsupported output; generated text still requires user review.
+
+A synthetic live Gemini check of the updated ATS prompt correctly treated June
+2026 graduation and the 2025 internship as past events and distinguished the
+experience requirement from demonstrated skills. The remaining synthetic checks
+hit the configured Gemini free-tier daily limit (20 requests reported by the
+provider). No billing or model plan was changed. Provider quota, outage and
+timeout handling is covered with deterministic failures; further real-model
+generation after the fix requires available provider quota.
+
+Release validation: all 44 backend regressions pass; frontend lint and production
+build pass. The local browser with a disposable synthetic resume renders all four
+panels, expands the interview answer, clears results when changing jobs, and
+displays the controlled quota failure with a usable retry button. Earlier console
+entries from rebuilding the running frontend and replacing the fixture session
+were resolved by restarting the frontend and signing into the disposable provider.

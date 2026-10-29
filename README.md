@@ -11,6 +11,18 @@ A job-search application for remote technology opportunities and Pakistan listin
 - Resume upload: text-based PDF, maximum 10 MiB, with structured Gemini parsing. Scanned PDFs require OCR outside this application.
 - Matching: up to 100 keyword-shortlisted candidates ranked with embeddings, with a labelled keyword fallback if the AI provider fails or times out. Scores are relevance estimates.
 - AI tools: resume/job compatibility estimate, cover letter, skill-gap analysis with reviewed learning resources, interview preparation, and resume suggestions.
+
+All job AI tools use the uploaded resume; skills-gap and interview preparation
+also include saved profile skills. Prompts receive the current UTC date to
+interpret career dates, distinguish internships from employment, and avoid
+inventing availability or credentials. Compatibility percentages are AI estimates
+and are not scores from an employer's ATS. Review generated text before using it.
+Learning links come from a reviewed publisher catalog; a workflow-specific gap
+uses its matching resource rather than a tutorial for an incidental language.
+Provider quota exhaustion is returned as HTTP 429 with an actionable message;
+temporary outages and timeouts use 503/504. The app does not automatically change
+plans or retry quota failures. The Gemini project's configured limits apply to
+resume parsing and generation across all users.
 - Tracker stages: Saved → Applied → Interview → Offer → Rejected. Desktop dragging, mobile status controls, and persistent notes are supported.
 - Resume synchronization adds skills while preserving manually entered experience years and target roles. Replacement uploads retain previous saved versions.
 

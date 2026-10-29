@@ -10,9 +10,10 @@ interface SkillsGapProps {
   userSkills: string[];
   jobRequiredSkills: string[];
   jobDescription: string;
+  resumeText: string;
 }
 
-export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescription }: SkillsGapProps) {
+export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescription, resumeText }: SkillsGapProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SkillGapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,8 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescriptio
       const data = await postAiSkillGap(
         userSkills.join(", "),
         jobRequiredSkills.join(", "),
-        jobDescription
+        jobDescription,
+        resumeText
       );
       setResult(data);
     } catch (err: unknown) {
@@ -39,7 +41,7 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescriptio
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
         <h3 className="text-lg font-semibold mb-2">Skills Gap Analysis</h3>
         <p className="text-sm text-zinc-400 mb-4">
-          Discover missing skills and get free course recommendations to level up.
+          Identify skills to strengthen and explore reviewed learning resources.
         </p>
         <button
           onClick={handleAnalyze}
@@ -82,13 +84,13 @@ export function SkillsGapAnalysis({ userSkills, jobRequiredSkills, jobDescriptio
         </div>
       ) : (
         <div className="mb-6 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
-          You have all the key skills required for this role!
+          No additional skill gaps were identified from the supplied skills. Check experience, education and eligibility separately.
         </div>
       )}
 
       <div>
         <p className="text-sm font-medium text-indigo-400 flex items-center gap-2 mb-3">
-          <BookOpen className="w-4 h-4" /> Recommended Free Courses
+          <BookOpen className="w-4 h-4" /> Reviewed Learning Resources
         </p>
         <div className="space-y-3">
           {result.courses.length === 0 && result.missing_skills.length > 0 && (

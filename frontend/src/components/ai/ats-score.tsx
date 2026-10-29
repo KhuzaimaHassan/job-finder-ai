@@ -49,9 +49,9 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
   if (!result && !loading) {
     return (
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 sm:p-6">
-        <h3 className="text-lg font-semibold mb-2">ATS Compatibility Score</h3>
+        <h3 className="text-lg font-semibold mb-2">ATS Compatibility Estimate</h3>
         <p className="text-sm text-zinc-400 mb-4">
-          See how well your resume matches this job description before applying.
+          Estimate how well your resume matches this posting. This is AI guidance; employers use their own screening criteria.
         </p>
         <button
           onClick={handleCalculate}
@@ -78,12 +78,13 @@ export function ATSScore({ jobDescription, resumeText }: ATSScoreProps) {
   return (
     <div className={`border rounded-xl p-4 sm:p-6 ${getScoreBg(result.score)}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h3 className="text-lg font-semibold text-white">ATS Score</h3>
+        <h3 className="text-lg font-semibold text-white">ATS Compatibility Estimate</h3>
         <div className={`text-2xl font-bold ${getScoreColor(result.score)}`}>
           {result.score}%
         </div>
       </div>
       
+      <p className="text-xs text-zinc-400 mb-3">AI estimate, not an employer ATS result. Review the gaps alongside the score.</p>
       <p className="text-sm text-zinc-300 mb-6">{result.verdict}</p>
 
       <div className="space-y-4">

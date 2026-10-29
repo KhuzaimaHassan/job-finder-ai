@@ -1,6 +1,8 @@
 import asyncio
 import threading
 import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock, patch
 
@@ -99,6 +101,55 @@ class ProductTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(ai_gemini, "_generate_text", AsyncMock(return_value='{"missing_skills":"Docker"}')):
             with self.assertRaises(ValueError): await ai_gemini.run_skill_gap("Python", "Docker")
         with self.assertRaises(ValueError): ParsedResume.model_validate({"skills": "Python"})
+
+    def test_coding_workflow_resource_does_not_recommend_known_language_basics(self):
+        resources = for_skills(["Practical experience using AI coding assistants in a Python workflow", "Docker", "Python and SQL"])
+        self.assertEqual(resources[0]["platform"], "GitHub Docs")
+        self.assertEqual(len(resources), 4)
+        self.assertEqual(len(for_skills(["Coding agents in Python", "AI coding assistants"])), 1)
+        self.assertEqual(for_skills(["An unknown specialist skill"]), [])
+
+    async def test_skill_and_interview_prompts_receive_resume_evidence(self):
+        resume_text = "Completed BSc June 2026; internship April-September 2025. Built LangGraph agents."
+        fake = AsyncMock(return_value='{"missing_skills":[]}')
+        with patch.object(ai_gemini, "_generate_text", fake):
+            await ai_gemini.run_skill_gap("Python", "Python", "Use AI coding tools in Python", resume_text)
+        self.assertIn(resume_text, fake.call_args.args[1])
+        fake = AsyncMock(return_value='{"questions":[{"question":"How would you test this?","answer_structure":"Outline checks."}]}')
+        with patch.object(ai_gemini, "_generate_text", fake):
+            await ai_gemini.run_interview_prep("ML Engineer", "Build models with Python", "Python", resume_text)
+        self.assertIn(resume_text, fake.call_args.args[1])
+
+    async def test_provider_receives_current_date_and_candidate_fact_rules(self):
+        import google.generativeai as genai
+        model = SimpleNamespace(generate_content_async=AsyncMock(return_value=SimpleNamespace(text="ok")))
+        with patch.object(ai_gemini.settings, "GEMINI_API_KEY", "synthetic"), \
+             patch.object(ai_gemini, "datetime") as clock, \
+             patch.object(genai, "configure"), \
+             patch.object(genai, "GenerativeModel", return_value=model) as factory:
+            clock.now.return_value = datetime(2026, 10, 28, tzinfo=timezone.utc)
+            self.assertEqual(await ai_gemini._generate_text("Career review", "BSc June 2026"), "ok")
+        instruction = factory.call_args.kwargs["system_instruction"]
+        self.assertIn("2026-10-28", instruction)
+        self.assertIn("not your training cutoff", instruction)
+        self.assertIn("Never turn a job requirement into a candidate fact", instruction)
+
+    async def test_provider_quota_and_outages_return_safe_actionable_errors(self):
+        import google.generativeai as genai
+        from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable, DeadlineExceeded
+        for error, status in [(ResourceExhausted("private provider diagnostics"), 429),
+                              (ServiceUnavailable("private provider diagnostics"), 503),
+                              (DeadlineExceeded("private provider diagnostics"), 504)]:
+            model = SimpleNamespace(generate_content_async=AsyncMock(side_effect=error))
+            with self.subTest(status=status), \
+                 patch.object(ai_gemini.settings, "GEMINI_API_KEY", "synthetic"), \
+                 patch.object(genai, "configure"), \
+                 patch.object(genai, "GenerativeModel", return_value=model):
+                with self.assertRaises(ai_gemini.AIServiceError) as caught:
+                    await ai_gemini._generate_text("Review", "Synthetic resume")
+                response = ai._gemini_http(caught.exception)
+                self.assertEqual(response.status_code, status)
+                self.assertNotIn("private provider", response.detail)
 
 
 if __name__ == "__main__":
