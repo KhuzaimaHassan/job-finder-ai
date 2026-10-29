@@ -18,6 +18,21 @@ USER = {"id": "local-user", "token": "synthetic"}
 
 
 class ProductTests(unittest.IsolatedAsyncioTestCase):
+    def test_live_frontend_alias_preflight_and_untrusted_origin_rejection(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        client = TestClient(app)
+        for origin in ["https://ai-jobfinder.vercel.app", "https://job-finder-ai-kappa.vercel.app"]:
+            response = client.options("/api/ai/ats-score", headers={
+                "Origin": origin, "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["access-control-allow-origin"], origin)
+        response = client.options("/api/ai/ats-score", headers={
+            "Origin": "https://untrusted-project.vercel.app", "Access-Control-Request-Method": "POST"})
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("access-control-allow-origin", response.headers)
+
     def test_precise_filters_can_combine_remote_and_employment(self):
         records = [job("partner", "Partner Solutions Engineer"), job("stack", "Full Stack Developer"),
                    job("remote-full", "Full-time Python Engineer", job_type="remote"),

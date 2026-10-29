@@ -162,7 +162,7 @@ Set the frontend environment values before starting. Open [localhost:3000](http:
 | `JOB_POSTED_MAX_AGE_DAYS` | Backend | Source publication/update age cap, default 30 |
 | `JOB_PROVIDER_MAX_PAGES` | Backend | Sequential traversal budget per query, default 5 |
 | `JOB_REFRESH_TIMEOUT_SECONDS` | Backend | Whole-run deadline, default 240 seconds |
-| `FRONTEND_URL` | Backend | Allowed frontend origin for CORS |
+| `FRONTEND_URL` | Backend | Allowed frontend origin for CORS; the verified production aliases `ai-jobfinder.vercel.app` and `job-finder-ai-kappa.vercel.app` are also allowed |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Backend | Optional Adzuna credentials |
 | `JSEARCH_API_KEY` | Backend | Unused by the scheduled aggregator while its calls remain disabled |
 | `NEXT_PUBLIC_API_URL` | Frontend | `http://localhost:8000` locally; Render API origin in production |
