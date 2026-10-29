@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import unittest
 from datetime import datetime, timezone
@@ -143,11 +144,30 @@ class ProductTests(unittest.IsolatedAsyncioTestCase):
              patch.object(genai, "configure"), \
              patch.object(genai, "GenerativeModel", return_value=model) as factory:
             clock.now.return_value = datetime(2026, 10, 28, tzinfo=timezone.utc)
-            self.assertEqual(await ai_gemini._generate_text("Career review", "BSc June 2026"), "ok")
+            self.assertEqual(await ai_gemini._generate_text("Career review", "BSc June 2026", json_schema=ai_gemini._ATS_SCHEMA), "ok")
         instruction = factory.call_args.kwargs["system_instruction"]
         self.assertIn("2026-10-28", instruction)
         self.assertIn("not your training cutoff", instruction)
         self.assertIn("Never turn a job requirement into a candidate fact", instruction)
+        self.assertIn("does not establish current enrollment", instruction)
+        self.assertIn("not use of a coding assistant", instruction)
+        config = factory.call_args.kwargs["generation_config"]
+        self.assertEqual(config["response_mime_type"], "application/json")
+        self.assertEqual(config["response_schema"]["type"], "OBJECT")
+
+    async def test_ats_does_not_publish_model_inferred_enrollment_status(self):
+        for verdict in ["The candidate is currently pursuing a Bachelor's degree.",
+                        "There is a degree gap (ongoing BS vs. MSc/PhD)."]:
+            fake = AsyncMock(return_value=json.dumps({"score":35,"matching_keywords":["Python"],
+                "missing_keywords":["MSc or PhD"],"verdict":verdict}))
+            with patch.object(ai_gemini, "_generate_text", fake):
+                result = await ai_gemini.run_ats_score("BSc June 2026, Python", "Needs MSc or PhD and Python")
+            self.assertNotIn("ongoing", result["verdict"])
+            self.assertNotIn("pursuing", result["verdict"])
+            self.assertIn("does not verify", result["verdict"])
+            self.assertEqual(result["missing_keywords"], ["MSc or PhD"])
+        self.assertEqual(ai_gemini._safe_ats_verdict("Lists a BSc; the posting requires an MSc."),
+                         "Lists a BSc; the posting requires an MSc.")
 
     async def test_provider_quota_and_outages_return_safe_actionable_errors(self):
         import google.generativeai as genai

@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 _MAX_RESUME_CHARS = 24_000
 _MAX_JOB_CHARS = 16_000
 
+_STRING = {"type": "STRING"}
+_STRINGS = {"type": "ARRAY", "items": _STRING}
+
+
+def _object_schema(properties: dict) -> dict:
+    return {"type": "OBJECT", "properties": properties, "required": list(properties)}
+
+
+_ATS_SCHEMA = _object_schema({"score": {"type": "INTEGER"}, "matching_keywords": _STRINGS,
+                              "missing_keywords": _STRINGS, "verdict": _STRING})
+_GAP_SCHEMA = _object_schema({"missing_skills": _STRINGS})
+_INTERVIEW_SCHEMA = _object_schema({"questions": {"type": "ARRAY", "items":
+    _object_schema({"question": _STRING, "answer_structure": _STRING})}})
+_IMPROVE_SCHEMA = _object_schema({"improvements": _STRINGS})
+
+
+def _safe_ats_verdict(verdict: str) -> str:
+    # Enrollment status is unnecessary for comparing degree levels. Do not
+    # publish a model's unverified current-enrollment inference as a fact.
+    status = r"(?:ongoing|pursuing|enrolled|current(?:ly)?\s+student)"
+    degree = r"(?:bachelor|master|degree|ph\.?d|bsc|msc|bs\b)"
+    if re.search(rf"\b{status}\b.{{0,70}}\b{degree}|\b{degree}.{{0,35}}\b{status}\b", verdict, re.I):
+        return ("Review the matching and missing requirements below. This AI estimate does not verify "
+                "degree completion, employment duration or eligibility; check those against your resume and the posting.")
+    return verdict
+
 
 class AIServiceError(Exception):
     """A provider failure with a safe, actionable client message."""
@@ -70,7 +96,7 @@ def _model_name() -> str:
     return getattr(settings, "GEMINI_AI_MODEL", None) or GEMINI_AI_MODEL_ID
 
 
-async def _generate_text(system_instruction: str, user_content: str) -> str:
+async def _generate_text(system_instruction: str, user_content: str, *, json_schema: dict | None = None) -> str:
     _require_gemini()
     import google.generativeai as genai
     from google.api_core.exceptions import ResourceExhausted, TooManyRequests, DeadlineExceeded, ServiceUnavailable
@@ -78,6 +104,8 @@ async def _generate_text(system_instruction: str, user_content: str) -> str:
     genai.configure(api_key=settings.GEMINI_API_KEY)
     model = genai.GenerativeModel(
         model_name=_model_name(),
+        generation_config=({"response_mime_type": "application/json", "response_schema": json_schema}
+                           if json_schema is not None else None),
         system_instruction=(system_instruction + "\n" + UNTRUSTED_INPUT_RULES
                             + "\nCurrent date (UTC): " + datetime.now(timezone.utc).date().isoformat()
                             + ". Evaluate career dates relative to this date, not your training cutoff."),
@@ -105,7 +133,7 @@ async def run_ats_score(resume_text: str, job_description: str) -> dict[str, Any
         resume_text=resume_text,
         job_description=job_description,
     )
-    raw = await _generate_text(ATS_SYSTEM, user)
+    raw = await _generate_text(ATS_SYSTEM, user, json_schema=_ATS_SCHEMA)
     data = _parse_json_object(raw)
     score = int(data.get("score", 0))
     score = max(0, min(100, score))
@@ -113,7 +141,7 @@ async def run_ats_score(resume_text: str, job_description: str) -> dict[str, Any
         "score": score,
         "matching_keywords": _strings(data.get("matching_keywords", []))[:50],
         "missing_keywords": _strings(data.get("missing_keywords", []))[:50],
-        "verdict": str(data.get("verdict", "")).strip() or "No verdict returned.",
+        "verdict": _safe_ats_verdict(str(data.get("verdict", "")).strip() or "No verdict returned."),
     }
 
 
@@ -145,7 +173,7 @@ async def run_skill_gap(user_skills: str, job_required_skills: str, job_descript
         job_description=job_description[:_MAX_JOB_CHARS] or "(not provided)",
         resume_text=resume_text[:_MAX_RESUME_CHARS] or "(not provided)",
     )
-    raw = await _generate_text(SKILL_GAP_SYSTEM, user)
+    raw = await _generate_text(SKILL_GAP_SYSTEM, user, json_schema=_GAP_SCHEMA)
     data = _parse_json_object(raw)
     raw_missing = data.get("missing_skills") or []
     missing = _strings(raw_missing)[:30]
@@ -168,7 +196,7 @@ async def run_interview_prep(
         user_skills=user_skills or "(not specified)",
         resume_text=resume_text[:_MAX_RESUME_CHARS] or "(not provided)",
     )
-    raw = await _generate_text(INTERVIEW_PREP_SYSTEM, user)
+    raw = await _generate_text(INTERVIEW_PREP_SYSTEM, user, json_schema=_INTERVIEW_SCHEMA)
     data = _parse_json_object(raw)
     questions_raw = data.get("questions") or []
     out: list[dict[str, str]] = []
@@ -194,7 +222,7 @@ async def run_resume_improve(resume_text: str, target_role: str) -> list[str]:
         resume_text=resume_text,
         target_role=target_role or "Software Engineer / Data Scientist",
     )
-    raw = await _generate_text(RESUME_IMPROVE_SYSTEM, user)
+    raw = await _generate_text(RESUME_IMPROVE_SYSTEM, user, json_schema=_IMPROVE_SCHEMA)
     data = _parse_json_object(raw)
     improvements_raw = data.get("improvements") or []
     out: list[str] = []

@@ -15,6 +15,16 @@ embedded in source documents. If facts are missing, acknowledge uncertainty.
 Never turn a job requirement into a candidate fact. Do not assert availability,
 start dates, working hours, work authorization, years of experience or qualifications
 unless the candidate's own supplied facts explicitly establish them.
+Education: prefer the degree type exactly as listed. A Bachelor's listing alone
+does not establish current enrollment. Never call a candidate 'currently pursuing'
+a degree or a 'current student' without explicit evidence of ongoing enrollment
+consistent with the current date. A graduation date that has already passed is
+not a future or expected date; do not rewrite it as one.
+Terminology: AI coding assistants are development tools such as GitHub Copilot,
+Claude Code or Cursor. LangGraph, RAG pipelines and calling an LLM API establish
+agent/application development, not use of a coding assistant. Never present an
+agent framework as a coding assistant or as an interchangeable alternative when
+assessing or asking about a job's coding-assistant workflow requirement.
 """
 
 # ---- ATS Score ----
@@ -115,6 +125,10 @@ Do not include markdown code fences."""
 
 # ---- Interview prep ----
 INTERVIEW_PREP_SYSTEM = """You are a hiring manager for technical roles preparing interview questions.
+When a posting requires coding-assistant experience, ask directly about use of
+development tools such as Copilot, Cursor or Claude Code. If use is not evidenced,
+ask how the candidate would approach the workflow. Do not offer LangGraph or RAG
+as alternative examples of coding assistants.
 Output ONLY valid JSON, no markdown."""
 
 INTERVIEW_PREP_USER_TEMPLATE = """Prepare interview preparation for this role.

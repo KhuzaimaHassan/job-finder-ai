@@ -134,3 +134,20 @@ lands on `ai-jobfinder.vercel.app`, while backend CORS allowed only the previous
 production alias. Both frontends returned the same deployed revision. The exact
 new origin is added to the allowlist; a regression verifies both aliases accept
 authenticated-request preflights and unrelated Vercel origins remain rejected.
+
+With quota available on 29 October, all four live tools returned results for both
+jobs and the resume improver returned five suggestions. The revised cover letters
+omitted unverified availability; the research-role skill gap used the reviewed
+GitHub guide. Targeted review still caught an unsupported current-enrollment label
+and a LangGraph/coding-assistant equivalence in an interview question. Shared
+system instructions now explicitly constrain both cases, with the interview
+system prompt additionally requiring development-tool examples for that workflow.
+
+A targeted synthetic run also returned an invalid top-level interview shape and
+repeated a current-enrollment inference despite prompt constraints. Structured AI
+tools now request provider-enforced JSON object schemas. ATS verdicts containing
+enrollment-status prose use neutral qualification-review wording instead of
+publishing that inference; matching/missing requirements remain visible.
+All 46 backend regressions pass. Targeted live synthetic checks returned a valid
+five-question object distinguishing development assistants from LangGraph and an
+ATS result preserving the MSc/PhD gap while neutralizing enrollment-status prose.
