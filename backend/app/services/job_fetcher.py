@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from app.config import settings
 from app.schemas.jobs import Job
 from app.services.job_normalization import contains_skill
+from app.services.db_retry import db_call
 from app.services.job_policy import searchable, parse_date, query_score, relevant_role
 from app.services.job_sources import (fetch_adzuna_jobs, fetch_remoteok_jobs, fetch_remotive_jobs,
     fetch_himalayas_jobs, fetch_jobicy_jobs, _parse_himalayas_job)
@@ -65,7 +66,7 @@ def _load_persisted_jobs():
 
 
 async def fetch_jobs_from_supabase():
-    return await asyncio.to_thread(_load_persisted_jobs)
+    return await db_call(_load_persisted_jobs, attempts=3)
 
 
 def publish_snapshot(jobs):
@@ -112,7 +113,8 @@ def _persist_jobs(jobs):
 
 
 async def persist_jobs_to_supabase(jobs):
-    await asyncio.to_thread(_persist_jobs, jobs)
+    # Upsert by provider ID is safe to repeat after a lost response.
+    await db_call(lambda: _persist_jobs(jobs), attempts=3)
 
 
 async def fetch_all_jobs():
