@@ -17,6 +17,9 @@ also include saved profile skills. Prompts receive the current UTC date to
 interpret career dates, distinguish internships from employment, and avoid
 inventing availability or credentials. Compatibility percentages are AI estimates
 and are not scores from an employer's ATS. Review generated text before using it.
+Structured tools request JSON object schemas from Gemini. ATS enrollment-status
+claims use neutral qualification-review wording rather than publishing an
+unverified inference about whether someone is currently studying.
 Learning links come from a reviewed publisher catalog; a workflow-specific gap
 uses its matching resource rather than a tutorial for an incidental language.
 Provider quota exhaustion is returned as HTTP 429 with an actionable message;
