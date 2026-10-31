@@ -84,9 +84,12 @@ async def upload_and_parse_resume(
             file_path, file_bytes,
             file_options={"content-type": "application/pdf"},
         )
-    except Exception as e:
-        logger.warning(f"Storage upload failed (non-critical): {e}")
-        file_path = ""
+    except Exception:
+        logger.exception("Resume PDF storage failed; previous resume retained")
+        raise HTTPException(
+            status_code=503,
+            detail="Your PDF could not be stored. Your previous resume is unchanged. Please try again later.",
+        )
 
     resume_record = {
         "user_id": user["id"],
@@ -116,7 +119,8 @@ async def upload_and_parse_resume(
     clear_user_embedding(user["id"])
 
     return {
-        "message": "Resume parsed successfully",
+        "message": "Resume PDF saved and parsed successfully",
+        "pdf_stored": True,
         "raw_text": resume_record["raw_text"],
         "skills": parsed.get("skills", []),
         "education": parsed.get("education", []),
@@ -146,6 +150,7 @@ async def get_resume(user: dict = Depends(get_current_user)):
     raw_text = resume.get("raw_text") or ""
     return {
         "parsed": True,
+        "pdf_stored": bool(resume.get("file_path")),
         "skills": resume.get("skills", []),
         "education": resume.get("education", []),
         "experience": resume.get("experience", []),

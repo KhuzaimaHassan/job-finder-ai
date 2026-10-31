@@ -34,11 +34,14 @@ def make_pdf(text="Local Test Candidate | Python, SQL, FastAPI | Backend enginee
 class MemoryStorage:
     def __init__(self):
         self.files = {}
+        self.fail_upload = False
 
     def from_(self, _bucket):
         return self
 
     def upload(self, path, content, **_kwargs):
+        if self.fail_upload:
+            raise RuntimeError("Synthetic storage outage")
         if path in self.files:
             raise RuntimeError("Existing PDF must not be overwritten")
         self.files[path] = content

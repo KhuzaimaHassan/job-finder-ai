@@ -3,7 +3,8 @@ import asyncio
 import hashlib
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -15,9 +16,26 @@ logger = logging.getLogger(__name__)
 
 
 class Feed(list):
-    def __init__(self, jobs=(), *, capped=False, error=None):
+    def __init__(self, jobs=(), *, capped=False, error=None, retry_at=None, continuation=None):
         super().__init__(jobs)
         self.capped, self.error = capped, error
+        self.retry_at, self.continuation = retry_at, continuation
+
+
+def provider_error(exc):
+    # Never include exception URLs: optional provider credentials can be present.
+    return f"HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+
+
+def retry_deadline(exc):
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return None
+    value = exc.response.headers.get("Retry-After", "")
+    try:
+        date = (datetime.now(timezone.utc) + timedelta(seconds=int(value))) if value.isdecimal() else parsedate_to_datetime(value)
+        return date.astimezone(timezone.utc).isoformat()
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 async def request_json(client, url, params=None, headers=None, attempts=3):
@@ -91,13 +109,19 @@ def _parse_himalayas_job(item):
                tags=tags(f"{title} {desc}"), salary=pay)
 
 
-async def fetch_himalayas_jobs(search="python", limit=None):
+async def fetch_himalayas_jobs(search="python", limit=None, start_page=1):
     result, seen = [], set()
     maximum = limit or settings.JOB_PROVIDER_MAX_PAGES * 20
+    # Recheck newest jobs on every pass, then advance the saved backfill page.
+    start_page = max(2, start_page)
+    pages = [1, *range(start_page, start_page + settings.JOB_PROVIDER_MAX_PAGES - 1)]
+    headers = {"Authorization": f"Bearer {settings.HIMALAYAS_API_KEY}"} if settings.HIMALAYAS_API_KEY else None
     async with httpx.AsyncClient() as client:
-        for page in range(1, settings.JOB_PROVIDER_MAX_PAGES + 1):
+        for index, page in enumerate(pages):
             try:
-                data = await request_json(client, "https://himalayas.app/jobs/api/search", {"q": search, "sort": "recent", "page": page})
+                if index:
+                    await asyncio.sleep(1.1)
+                data = await request_json(client, "https://himalayas.app/jobs/api/search", {"q": search, "sort": "recent", "page": page}, headers=headers)
                 items = data.get("jobs", [])
                 if not items:
                     return Feed(result)
@@ -107,16 +131,14 @@ async def fetch_himalayas_jobs(search="python", limit=None):
                 added = [job for job in fresh if job.id not in seen]
                 result.extend(added)
                 seen.update(job.id for job in added)
-                if not added and fresh:
-                    return Feed(result)
                 if len(result) >= maximum:
-                    return Feed(result[:maximum], capped=True)
-                await asyncio.sleep(1.1)
+                    return Feed(result[:maximum], capped=True, continuation={"page": page + 1})
             except Exception as exc:
-                if not result:
+                if not index:
                     raise
-                return Feed(result, error=type(exc).__name__)
-    return Feed(result, capped=True)
+                return Feed(result, error=provider_error(exc), retry_at=retry_deadline(exc),
+                            capped=True, continuation={"page": page})
+    return Feed(result, capped=True, continuation={"page": pages[-1] + 1})
 
 
 def parse_jobicy(item):
@@ -133,29 +155,53 @@ def parse_jobicy(item):
                salary=salary(item.get("salaryMin"), item.get("salaryMax"), item.get("salaryCurrency") or "USD"))
 
 
-async def fetch_jobicy_jobs(count=100, tag=""):
-    result, cursor, cursors = [], None, set()
+async def fetch_jobicy_jobs(count=100, tag="", continuation=None):
+    result, cursor, cursors, seen = [], None, set(), set()
+    saved = continuation or {}
+    now = datetime.now(timezone.utc)
+    started = parse_date(saved.get("started_at"))
+    # Jobicy cursors expire after 24h. Leave a margin for request duration.
+    resume_cursor = saved.get("cursor") if started and now - timedelta(hours=23) < started <= now else None
+    started_at = started.isoformat() if resume_cursor else now.isoformat()
+    head_cursor = None
     async with httpx.AsyncClient() as client:
-        for _ in range(settings.JOB_PROVIDER_MAX_PAGES):
+        for index in range(settings.JOB_PROVIDER_MAX_PAGES):
             params = {"count": count}
             if tag:
                 params["tag"] = tag
             if cursor:
                 params["cursor"] = cursor
             try:
+                if index:
+                    await asyncio.sleep(1.1)
                 data = await request_json(client, "https://jobicy.com/api/jobs", params)
+                fresh = []
                 for item in data.get("jobs", []):
-                    add_record(result, parse_jobicy, item)
-                cursor = data.get("nextCursor")
-                if not cursor or cursor in cursors:
+                    add_record(fresh, parse_jobicy, item)
+                for job in fresh:
+                    if job.id not in seen:
+                        result.append(job)
+                        seen.add(job.id)
+                next_cursor = data.get("nextCursor")
+                if not next_cursor:
                     return Feed(result)
+                if next_cursor in cursors or next_cursor == cursor:
+                    return Feed(result, capped=True, error="Repeated pagination cursor")
+                if not index:
+                    head_cursor = next_cursor
+                    cursor = resume_cursor or next_cursor
+                else:
+                    cursor = next_cursor
                 cursors.add(cursor)
-                await asyncio.sleep(1.1)
             except Exception as exc:
-                if not result:
+                if not index:
                     raise
-                return Feed(result, error=type(exc).__name__)
-    return Feed(result, capped=True)
+                # Invalid/expired continuations start afresh on the next slot.
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 400:
+                    cursor, started_at = head_cursor, now.isoformat()
+                return Feed(result, error=provider_error(exc), retry_at=retry_deadline(exc), capped=True,
+                            continuation={"cursor": cursor, "started_at": started_at} if cursor else None)
+    return Feed(result, capped=True, continuation={"cursor": cursor, "started_at": started_at})
 
 
 async def jobicy_status(ids):
@@ -238,5 +284,5 @@ async def fetch_adzuna_jobs(query="data science python remote", country="gb", pa
             except Exception as exc:
                 if not result:
                     raise
-                return Feed(result, error=type(exc).__name__)
+                return Feed(result, error=provider_error(exc), retry_at=retry_deadline(exc))
     return Feed(result, capped=True)

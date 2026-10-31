@@ -1,16 +1,13 @@
 """Durable provider budgets, cross-process leases, run history and safe publication."""
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
 from uuid import uuid4
-from email.utils import parsedate_to_datetime
-
-import httpx
 
 from app.config import settings
 from app.services import job_fetcher as jf
 from app.services.job_policy import parse_date, searchable
-from app.services.job_sources import Feed, jobicy_status
+from app.services.job_sources import Feed, jobicy_status, provider_error, retry_deadline
 from app.services.db_retry import db_call
 
 logger = logging.getLogger(__name__)
@@ -19,7 +16,9 @@ _status = {"running": False, "sources": {}, "last_completed_at": None}
 
 
 def status():
-    return {**_status, "ready": jf.cache_ready(), "jobs_cached": len(jf.get_all_jobs()),
+    public_sources = {name: {key: value for key, value in source.items() if key != "continuation"}
+                      for name, source in _status.get("sources", {}).items()}
+    return {**_status, "sources": public_sources, "ready": jf.cache_ready(), "jobs_cached": len(jf.get_all_jobs()),
             "max_posted_age_days": settings.JOB_POSTED_MAX_AGE_DAYS,
             "max_unseen_age_days": settings.JOB_CACHE_MAX_AGE_DAYS}
 
@@ -30,47 +29,60 @@ def due(source, sources, now):
 
 
 async def _himalayas():
-    jobs, errors, capped = [], [], False
-    for query in ("python", "data science", "machine learning", "AI engineer", "software engineer"):
+    jobs, error, retry_at, capped = [], None, None, False
+    pages = dict(_status.get("sources", {}).get("himalayas", {}).get("continuation") or {})
+    queries = ("python", "data science", "machine learning", "AI engineer", "software engineer")
+    first_query = pages.pop("_next_query", 0) % len(queries)
+    for index in range(len(queries)):
+        query_index = (first_query + index) % len(queries)
+        query = queries[query_index]
         try:
-            feed = await jf.fetch_himalayas_jobs(query)
+            if index:
+                await asyncio.sleep(1.1)
+            feed = await jf.fetch_himalayas_jobs(query, start_page=pages.get(query, 1))
             jobs.extend(feed)
             capped |= getattr(feed, "capped", False)
+            pages[query] = (getattr(feed, "continuation", None) or {}).get("page", 1)
+            pages["_next_query"] = (query_index + 1) % len(queries)
             if getattr(feed, "error", None):
-                errors.append(feed.error)
+                error, retry_at = feed.error, feed.retry_at
+                break  # A partial feed can also contain a 429; end the whole source pass.
         except Exception as exc:
-            errors.append(type(exc).__name__)
-            break  # Especially 429: do not continue issuing queries.
-    if errors and not jobs:
-        raise RuntimeError(errors[0])
-    return Feed(jobs, capped=capped, error=", ".join(errors) or None)
+            if not jobs:
+                raise  # Preserve HTTP status and Retry-After, not a generic RuntimeError.
+            error, retry_at = provider_error(exc), retry_deadline(exc)
+            break
+    return Feed(jobs, capped=capped or bool(error), error=error, retry_at=retry_at, continuation=pages)
 
 
 async def _adzuna():
-    jobs, errors, capped = [], [], False
+    jobs, error, retry_at, capped = [], None, None, False
     for country in ("gb", "us", "in"):
         try:
             feed = await jf.fetch_adzuna_jobs(country=country)
             jobs.extend(feed)
             capped |= getattr(feed, "capped", False)
             if getattr(feed, "error", None):
-                errors.append(feed.error)
+                error, retry_at = feed.error, feed.retry_at
+                break
         except Exception as exc:
-            errors.append(type(exc).__name__)
+            if not jobs:
+                raise
+            error, retry_at = provider_error(exc), retry_deadline(exc)
             break
-    if errors and not jobs:
-        raise RuntimeError(errors[0])
-    return Feed(jobs, capped=capped, error=", ".join(errors) or None)
+    return Feed(jobs, capped=capped, error=error, retry_at=retry_at)
 
 
 async def _jobicy():
-    feed = await jf.fetch_jobicy_jobs()
+    feed = await jf.fetch_jobicy_jobs(continuation=_status.get("sources", {}).get("jobicy", {}).get("continuation"))
     # Reconcile stored IDs independently of feed pagination/publication window.
     ids = {job.provider_id or job.id.removeprefix("jobicy_") for job in jf._job_store.values()
            if job.source == "jobicy" and searchable(job)}
     # Fresh feed rows are already active; check missing cached IDs instead.
     ids.difference_update(job.provider_id for job in feed if job.provider_id)
     try:
+        if feed.error:
+            return feed  # Do not issue a status request after a failed discovery pass.
         pending = sorted(value for value in ids if value and value.isdecimal())
         offset = _status.get("sources", {}).get("jobicy", {}).get("recheck_cursor", 0)
         offset = offset % len(pending) if pending else 0
@@ -79,7 +91,8 @@ async def _jobicy():
         feed.recheck_cursor = (offset + len(batch)) % len(pending) if pending else 0
         feed.availability = checks
     except Exception as exc:
-        feed.error = "Availability check: " + type(exc).__name__
+        feed.error = "Availability check: " + provider_error(exc)
+        feed.retry_at = retry_deadline(exc)
     return feed
 
 
@@ -159,20 +172,20 @@ async def refresh_jobs():
                     outcome = {**sources[name], "status": "partial" if error or getattr(feed, "capped", False) else "success",
                                "last_success_at": datetime.now(timezone.utc).isoformat(), "observed": len(fresh),
                                "coverage_capped": getattr(feed, "capped", False), "error": error}
+                    outcome["continuation"] = getattr(feed, "continuation", None)
+                    outcome["backfill_pending"] = bool(getattr(feed, "capped", False) and getattr(feed, "continuation", None))
+                    retry_at = parse_date(getattr(feed, "retry_at", None))
+                    if retry_at and retry_at > parse_date(outcome["next_due_at"]):
+                        outcome["next_due_at"] = retry_at.isoformat()
                     if hasattr(feed, "recheck_cursor"):
                         outcome["recheck_cursor"] = feed.recheck_cursor
                 except Exception as exc:
                     # Do not expose exception text: provider URLs can contain keys.
                     logger.warning("Job provider %s failed: %s", name, type(exc).__name__)
-                    outcome = {**sources[name], "status": "failed", "error": type(exc).__name__}
-                    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-                        retry_after = exc.response.headers.get("Retry-After", "")
-                        try:
-                            retry_at = datetime.now(timezone.utc) + timedelta(seconds=int(retry_after)) if retry_after.isdecimal() else parsedate_to_datetime(retry_after)
-                            if retry_at > parse_date(outcome["next_due_at"]):
-                                outcome["next_due_at"] = retry_at.isoformat()
-                        except (ValueError, TypeError, OverflowError):
-                            pass
+                    outcome = {**sources[name], "status": "failed", "error": provider_error(exc)}
+                    retry_at = parse_date(retry_deadline(exc))
+                    if retry_at and retry_at > parse_date(outcome["next_due_at"]):
+                        outcome["next_due_at"] = retry_at.isoformat()
                 sources[name] = outcome
                 outcomes[name] = outcome
                 try:
