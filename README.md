@@ -29,6 +29,11 @@ resume parsing and generation across all users.
 - Tracker stages: Saved → Applied → Interview → Offer → Rejected. Desktop dragging, mobile status controls, and persistent notes are supported.
 - Resume synchronization adds skills while preserving manually entered experience years and target roles. Replacement uploads retain previous saved versions.
 
+Resume uploads succeed only after both the private PDF and parsed data are saved.
+A storage failure returns HTTP 503 and preserves the previous resume. The Resume
+page warns when a legacy record contains parsed text without a stored PDF; upload
+the original again after configuring storage. Parsed text cannot recreate that PDF.
+
 ## Are the jobs live and recent?
 
 **The application polls live provider APIs and enforces source-date, last-observation, and expiry limits on every search/matching read.** By default a listing must be dated/updated within 30 days and last observed within 14 days. Unknown dates, explicit expiry/closure and checked-unknown availability are excluded. Source dates are not universally original publication dates.
@@ -45,13 +50,19 @@ Search supports word-aware terms/phrases, combined filters and last-7/14-day vie
 | --- | --- |
 | RemoteOK | One feed per due slot; technology-role filtering |
 | Remotive | One broad feed per due slot; filtered locally, avoiding overlapping burst queries |
-| Himalayas | Five newest-first searches with bounded sequential pages; expiry/identity/restrictions persisted |
-| Jobicy | Canonical cursor feed plus stored-job availability checks |
+| Himalayas | Five targeted searches; newest page plus durable backfill progress; expiry/identity/restrictions persisted |
+| Jobicy | Newest page plus resumable opaque-cursor backfill and stored-job availability checks |
 | Adzuna | Optional credentialed GB/US/India searches, date ordering and bounded pages |
 | Indeed / LinkedIn | Separate optional manual scraper; no provisioned automatic Pakistan importer |
 | JSearch | Disabled pending an operating-budget decision |
 
 Page budgets intentionally bound discovery; coverage caps and provider failures are reported rather than treated as a complete catalogue. Remote jobs can have country/timezone restrictions. Employer availability remains subject to change.
+
+Backfill continues in later scheduled passes instead of repeatedly reading only
+the first pages. Partial HTTP failures retain their status and Retry-After
+deadline; later requests for that source stop. An optional free
+`HIMALAYAS_API_KEY` provides a dedicated allowance; without it, the anonymous
+quota is shared with other API callers. No paid plan is required by these fixes.
 
 See [job fetching, search, matching and operations](docs/JOB_FETCHING.md). The [28 October production audit](docs/job-freshness-audit-2026-10-28.json) documents the **previous** implementation and is retained as historical evidence.
 
@@ -112,6 +123,12 @@ Use **Python 3.12** to match the deployed backend and **Node.js 20.9+** (Node 22
 3. Set the Supabase Site URL to your frontend URL and allow `http://localhost:3000/dashboard` for local OAuth redirects. Allow `https://job-finder-ai-kappa.vercel.app/dashboard` for this production frontend, or the equivalent URL for your own deployment.
 4. Keep the Supabase service-role key on the backend only. The browser uses the public anon key and the signed-in user's token. Jobs are publicly readable; user tables and resume objects use user policies.
 
+For an existing project missing PDF storage, review and apply
+[`backend/migrations/20261031_resume_storage.sql`](backend/migrations/20261031_resume_storage.sql).
+It provisions the private 10 MB PDF bucket and per-user folder policies without
+deleting resume records. Verify storage through an authenticated upload; a
+service-role upload alone does not verify user access policies.
+
 ### 2. Backend
 
 From the repository root:
@@ -167,6 +184,7 @@ Set the frontend environment values before starting. Open [localhost:3000](http:
 | `JOB_REFRESH_TIMEOUT_SECONDS` | Backend | Whole-run deadline, default 240 seconds |
 | `FRONTEND_URL` | Backend | Allowed frontend origin for CORS; the verified production aliases `ai-jobfinder.vercel.app` and `job-finder-ai-kappa.vercel.app` are also allowed |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Backend | Optional Adzuna credentials |
+| `HIMALAYAS_API_KEY` | Backend only | Optional free key; anonymous API requests share a public allowance |
 | `JSEARCH_API_KEY` | Backend | Unused by the scheduled aggregator while its calls remain disabled |
 | `NEXT_PUBLIC_API_URL` | Frontend | `http://localhost:8000` locally; Render API origin in production |
 | `NEXT_PUBLIC_SUPABASE_URL` | Frontend | Same Supabase project as the backend |

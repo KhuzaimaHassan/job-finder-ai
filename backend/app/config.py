@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # Adzuna API credentials (register free at developer.adzuna.com)
     ADZUNA_APP_ID: Optional[str] = None
     ADZUNA_APP_KEY: Optional[str] = None
+    HIMALAYAS_API_KEY: Optional[str] = None
 
     # JSearch API via RapidAPI (free 200 req/month)
     JSEARCH_API_KEY: Optional[str] = None
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
     MATCH_TIMEOUT_SECONDS: float = Field(20.0, gt=0, le=40)
     JOB_CACHE_MAX_AGE_DAYS: int = Field(14, ge=1)
     JOB_POSTED_MAX_AGE_DAYS: int = Field(30, ge=1, le=365)
-    JOB_PROVIDER_MAX_PAGES: int = Field(5, ge=1, le=20)
+    JOB_PROVIDER_MAX_PAGES: int = Field(5, ge=2, le=20)
     JOB_REFRESH_TIMEOUT_SECONDS: int = Field(240, ge=30, le=480)
 
     # Frontend URL for CORS

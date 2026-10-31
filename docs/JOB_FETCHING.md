@@ -41,15 +41,35 @@ so another provider's newly published jobs are retained.
 | --- | --- | --- |
 | RemoteOK | One public feed; technology-role filtering | Six-hour UTC slots; bounded transient retries |
 | Remotive | **One broad public feed**, filtered locally | Six-hour UTC slots; no burst of 15 searches and no immediate retry storm |
-| Himalayas | Five targeted newest-first searches; sequential pages, stable guid IDs | Daily UTC slot; explicit expiry persisted; bounded partial coverage reported |
-| Jobicy | Canonical `/api/jobs` with sequential opaque cursor traversal | Six-hour slots; stored numeric IDs checked through `/api/jobs/status` in batches up to 100 |
+| Himalayas | Five targeted searches; newest page and persisted next backfill page per query, stable guid IDs | Daily UTC slot; explicit expiry persisted; bounded partial coverage reported |
+| Jobicy | Canonical `/api/jobs`; newest page then saved opaque continuation | Six-hour slots; stored numeric IDs checked through `/api/jobs/status` in batches up to 100 |
 | Adzuna | GB/US/India remote-themed searches, newest first, provider age filter, bounded pages | Optional credentials; six-hour slots; no Pakistan query |
 | Indeed / LinkedIn | Separate optional manual importer | Not automatically fetched by the standard cloud requirements |
 | JSearch | Not enabled | Quota/operating-budget decision remains separate |
 
 Jobicy `closed` is archived; `unknown` is hidden without claiming confirmed closure. A provider status check is not a live probe of an employer's ATS. Older Himalayas rows without preserved provider identity are withheld until observed with the richer metadata. Expiry and missing-ID handling do not assume a capped first feed is a complete catalogue.
 
-429 responses stop that request pass. Where an HTTP `Retry-After` survives to the coordinator, its later deadline extends the normal next-due time. Transport/5xx retries are bounded with jitter; Remotive uses one attempt per slot. Errors are stored as categories, not raw credential-bearing URLs.
+Himalayas backfill resumes past the previous page budget, while page one is
+checked on every pass. Each query resets after an empty page; neither an estimated
+total nor a duplicate page proves completion. Numbered search results can move
+between passes, so GUID deduplication remains necessary. The optional
+`HIMALAYAS_API_KEY` is sent only in a server-side Authorization header.
+After a partial query failure, the next pass starts with the following query so
+the same first query cannot continually consume the available source budget.
+
+Jobicy also checks page one each time, then follows its saved cursor within the
+same page budget. Cursor progress and its original start time persist in private
+ingestion state. Continuations older than 23 hours are discarded before the
+provider's 24-hour expiry. A rejected cursor schedules a fresh traversal for the
+next slot, rather than retrying immediately. New records arriving during a walk
+are picked up by the next head check; coverage is still bounded, not exhaustive.
+
+429 responses stop the whole source pass, including later queries and availability
+checks. Partial feeds preserve safe HTTP status categories and Retry-After, whose
+later deadline extends the normal next-due time even when some jobs were saved.
+Transport/5xx retries are bounded with jitter; Remotive uses one attempt per slot.
+Errors do not include raw credential-bearing URLs. Public status exposes
+`backfill_pending` but omits internal continuation tokens.
 
 Coverage remains intentionally bounded, not exhaustive. Capped/partial outcomes are visible through status; the UI does not claim every vacancy on each provider is present. Primary references: [Himalayas API](https://himalayas.app/api), [Remotive API](https://github.com/remotive-com/remote-jobs-api), [Jobicy API](https://jobicy.com/jobs-rss-feed).
 

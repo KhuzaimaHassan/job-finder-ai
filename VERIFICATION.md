@@ -172,3 +172,46 @@ providers finish, serialized state writes, lease release despite history failure
 and concurrent publication during an awaited availability update. These tests
 exercise the real coordinator with disposable storage; they do not claim a fresh
 production provider cycle succeeded before its next allowed slot.
+
+## Resume storage and provider continuation — 31 October 2026
+
+The live service audit found no `resumes` storage bucket and a legacy resume with
+parsed text but no PDF path. The approved additive
+`backend/migrations/20261031_resume_storage.sql` was applied successfully to the
+configured JobFinder project. It creates a private, PDF-only, 10 MB bucket and
+UUID-folder ownership policies. Live verification with two disposable accounts
+passed owner upload/download, cross-user read/upload denial and anonymous public
+read denial. The test object and both test accounts/profile rows were removed;
+the candidate's existing resume was preserved.
+
+Uploads now return success only after PDF storage and parsed-row persistence.
+Storage failures return a safe 503 without replacing the last resume; the API
+returns `pdf_stored` metadata and the UI warns about legacy text-only records.
+An original PDF that was never stored must be uploaded again by its owner.
+
+Himalayas queries retain safe HTTP status/Retry-After through partial results,
+stop the source pass after failure, pace query transitions, save backfill pages
+and rotate the starting query after partial failure. Jobicy checks the newest
+page before resuming a saved opaque cursor, expires continuations after 23 hours,
+and detects pagination loops. Internal continuation state is not public; the
+dashboard explains queued backfill. Bounded coverage remains visible as partial
+instead of claiming an exhaustive provider catalogue. Optional free Himalayas
+keys are supported; no key or paid plan was added.
+
+Validation: the full 59-test backend suite passed. Added regressions cover private
+storage failure preserving the prior resume/PDF, legacy PDF metadata, cross-pass
+pagination, expired/repeated cursors, HTTP 429 propagation, source-request stop,
+durable cooldown/continuation and public-state redaction. Affected regressions
+were rerun after fair query rotation was added. Frontend lint and production build
+passed. Local browser checks used the real routers with disposable storage/auth
+and deterministic AI: a successful upload stored one row and one PDF; a simulated
+storage outage displayed the safe error and left both counts unchanged at one;
+the previous success message disappeared. The dashboard rendered queued-backfill
+status. Development-only React eval diagnostics in the browser automation
+environment did not affect these flows; production build passed without changing
+the content security policy.
+
+Bounded read-only checks against real provider APIs returned 33 relevant Himalayas
+jobs and 62 Jobicy jobs with no HTTP error, plus continuation metadata. These were
+two-page adapter checks without database publication, not a full production
+refresh or proof that external providers will never rate-limit future runs.

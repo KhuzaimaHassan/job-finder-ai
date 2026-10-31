@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import settings
 from app.routers import jobs, profile, resume, applications, ai, auth
-from app.services import job_fetcher, ai_gemini
+from app.services import job_fetcher, ai_gemini, ingestion
 from app.services.auth import get_current_user
 from app.limiter import limiter
 from tests.support import MemoryDB, make_pdf
@@ -61,6 +61,8 @@ for module in (profile, resume, applications, jobs):
     module.get_user_supabase = lambda _token: db
     module.get_supabase = lambda: db
 settings.GEMINI_API_KEY = None  # fixture never contacts Gemini or cloud storage
+ingestion._status = {"running": False, "last_completed_at": now, "sources": {
+    "jobicy": {"status": "partial", "coverage_capped": True, "backfill_pending": True, "error": None}}}
 
 
 async def parsed(text):
@@ -152,6 +154,12 @@ def pdf():
 def fail(enabled: bool):
     if enabled: db.fail_insert.add("resumes")
     else: db.fail_insert.discard("resumes")
+    return {"enabled": enabled}
+
+
+@app.post("/_test/storage-failure/{enabled}")
+def storage_fail(enabled: bool):
+    db.storage.fail_upload = enabled
     return {"enabled": enabled}
 
 

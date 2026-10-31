@@ -9,6 +9,7 @@ import { ResumeImprover } from "@/components/ai/resume-improver";
 import { apiErrorMessage } from "@/lib/errors";
 
 interface ParsedResume {
+  pdf_stored?: boolean;
   raw_text?: string;
   skills?: string[];
   experience?: { title?: string; company?: string; duration?: string }[];
@@ -22,6 +23,7 @@ function ResumePageContent() {
   const [parsedData, setParsedData] = useState<ParsedResume | null>(null);
   const [existingResumeText, setExistingResumeText] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<string | null>(null);
+  const [pdfMissing, setPdfMissing] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -31,6 +33,7 @@ function ResumePageContent() {
         const res = await api.get(`/api/resume`);
         if (res.data && res.data.parsed) {
           setExistingResumeText(res.data.raw_text);
+          setPdfMissing(res.data.pdf_stored === false);
         }
       } catch {
         setError("Could not load your saved resume. Refresh the page to try again.");
@@ -64,6 +67,7 @@ function ResumePageContent() {
     if (!file) return;
 
     setUploading(true);
+    setSuccess(false);
     setError(null);
     setSyncWarning(null);
     
@@ -81,6 +85,7 @@ function ResumePageContent() {
       setSuccess(true);
       setParsedData(data);
       setExistingResumeText(data.raw_text ?? null);
+      setPdfMissing(data.pdf_stored === false);
       
       // Auto-sync profile with resume data
       try {
@@ -180,12 +185,13 @@ function ResumePageContent() {
             {success && (
               <div className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3">
                 <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-                <p className="text-sm text-emerald-300">Resume successfully parsed and skills extracted.</p>
+                <p className="text-sm text-emerald-300">{parsedData?.pdf_stored ? "Resume PDF saved, parsed, and skills extracted." : "Resume parsed and skills extracted."}</p>
               </div>
             )}
           </div>
 
           {syncWarning && <p role="status" className="mb-6 text-sm text-amber-300">{syncWarning}</p>}
+          {pdfMissing && <p role="status" className="mb-6 text-sm text-amber-300">Your saved resume text is available, but its original PDF was not stored. Upload the PDF again to save it.</p>}
 
           {parsedData && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">

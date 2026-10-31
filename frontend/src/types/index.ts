@@ -30,7 +30,7 @@ export interface JobSearchResponse {
 export interface JobIngestionStatus {
   ready: boolean; running: boolean; jobs_cached: number; max_posted_age_days: number;
   last_completed_at: string | null; error?: string | null;
-  sources: Record<string, { status: string; last_success_at?: string; next_due_at?: string; error?: string | null; coverage_capped?: boolean }>;
+  sources: Record<string, { status: string; last_success_at?: string; next_due_at?: string; error?: string | null; coverage_capped?: boolean; backfill_pending?: boolean }>;
 }
 
 export interface JobSearchParams {
@@ -56,6 +56,7 @@ export interface UserProfileRow {
 
 export interface ResumeInfo {
   parsed: boolean;
+  pdf_stored?: boolean;
   raw_text?: string;
   skills?: string[];
   education?: unknown[];

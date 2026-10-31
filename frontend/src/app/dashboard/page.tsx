@@ -176,6 +176,7 @@ Recent listings matched to your resume and skills
             {ingestion?.running && <p className="text-indigo-300">Refreshing sources; showing the latest saved listings.</p>}
             {ingestion && (ingestion.error || Object.values(ingestion.sources).some(source => source.status === "failed" || source.error)) && <p className="text-amber-300">Some sources could not refresh. Their last saved listings remain subject to the freshness limit.</p>}
             {ingestion && Object.values(ingestion.sources).some(source => source.coverage_capped) && <p>Some sources supplied a limited set of listings.</p>}
+            {ingestion && Object.values(ingestion.sources).some(source => source.backfill_pending) && <p>Additional source pages are queued for future scheduled refreshes; newest listings are checked each pass.</p>}
             {ingestion?.last_completed_at && <p>Last refresh completed: {new Date(ingestion.last_completed_at).toLocaleString()}</p>}
             {matchMode === "matched" && <p>Ranked from your saved skills, target roles, experience, location and latest resume. Known location conflicts are excluded; scores estimate relevance.</p>}
           </div>
