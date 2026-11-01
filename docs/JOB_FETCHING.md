@@ -1,5 +1,7 @@
 # Job fetching, search and personalized matching
 
+[Back to documentation](../README.md)
+
 This guide describes the ingestion/search implementation. The earlier [28 October audit](job-freshness-audit-2026-10-28.json) and [startup sample](job-freshness-startup-2026-10-28.json) are historical evidence of the previous implementation, not current live totals.
 
 ## Freshness and history
@@ -129,7 +131,7 @@ python scripts/audit_freshness.py --database --output ../freshness-report.json
 
 The optional database comparison reads the configured public jobs table; confirm it belongs to the same API. No job ingestion or mutation is triggered by this audit tool. It scans at most 50,000 rows and reports that cap. Multi-page reads are not a cross-request database snapshot.
 
-For scheduled-run investigation, use the GitHub workflow log and the private `job_fetch_runs` / `job_ingestion_state` records. A healthy HTTP response alone does not certify all providers refreshed successfully. Test evidence and outstanding provider/environment limits belong in [VERIFICATION.md](../VERIFICATION.md).
+For scheduled-run investigation, use the GitHub workflow log and the private `job_fetch_runs` / `job_ingestion_state` records. A healthy HTTP response alone does not certify all providers refreshed successfully. Test evidence and outstanding provider/environment limits belong in [VERIFICATION.md](VERIFICATION.md).
 
 The verification workflow fails on a coordinator error, a provider whose status
 is `failed`, or readiness not completing within its window. It prints source

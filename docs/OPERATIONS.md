@@ -1,5 +1,7 @@
 # Operations and reliability
 
+[Back to documentation](../README.md)
+
 This guide describes the deployed application's checks and known operational
 limits. Observations below are dated evidence, not a live status page.
 

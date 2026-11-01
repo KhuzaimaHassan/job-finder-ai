@@ -25,4 +25,4 @@ npm start
 
 Vercel uses this directory as the project root. The production `X-App-Revision` header identifies the deployed Git commit.
 
-The dashboard reads the backend snapshot when it requests jobs; it does not stream newly imported jobs. Its source date is not a guarantee that the employer is still accepting applications. See the [main README](../README.md), [job freshness guide](../docs/JOB_FETCHING.md), and [verification record](../VERIFICATION.md) for setup, limits and the disposable local browser fixture.
+The dashboard reads the backend snapshot when it requests jobs; it does not stream newly imported jobs. Its source date is not a guarantee that the employer is still accepting applications. See the [main README](../README.md), [job freshness guide](../docs/JOB_FETCHING.md), [testing guide](../docs/TESTING.md), and [verification record](../docs/VERIFICATION.md) for setup, limits and the disposable local browser fixture.
