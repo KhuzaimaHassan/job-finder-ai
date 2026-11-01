@@ -215,3 +215,41 @@ Bounded read-only checks against real provider APIs returned 33 relevant Himalay
 jobs and 62 Jobicy jobs with no HTTP error, plus continuation metadata. These were
 two-page adapter checks without database publication, not a full production
 refresh or proof that external providers will never rate-limit future runs.
+
+## Production release evidence — 31 October 2026
+
+PR #10 merged as `1bf2ffe5b28eb856c21803e8380dca31e3b85855`. Vercel reported a
+successful production deployment and Render showed the same revision Live.
+The backend subsequently reported healthy/ready with 1,160 searchable jobs.
+Live browser search for `Python SQL` returned 206 results, and personalized
+matching returned five results labeled AI + Profile Match.
+
+A complete upload through the deployed resume endpoint using a disposable
+synthetic account and one real Gemini parse returned HTTP 200, `pdf_stored: true`
+and three extracted skills. The privately stored PDF was byte-identical to the
+upload; the latest-resume endpoint reported the saved-PDF status. The test PDF,
+resume/profile rows and account were removed. The existing candidate's Resume
+page showed the missing-original warning while retaining parsed text access.
+
+These observations are dated smoke checks. They do not establish sustained
+operation within the Free instance's memory budget.
+
+## Open Render memory incident — 1 November 2026
+
+Render confirmed a memory-limit restart above 512 MB on 31 October at
+17:08:21 UTC / 10:08:21 PM PKT, after revision `1bf2ffe` was deployed. Logs before
+the crash showed repeated scheduler skips while prior one-minute refresh jobs
+were still running. Repeated full snapshot reloads and startup allocations are
+candidate contributors; the allocation-level cause has not been established.
+
+During the 1 November investigation, the process responded but repeatedly
+reported `ready: false` and zero cached jobs. The latest five inspected scheduled
+checks succeeded, including run 41280920630; those runs do not prove continuous
+availability, complete provider coverage or memory stability. A partial source
+with an error can pass the current workflow.
+
+No memory fix or plan change was performed during that investigation. Further
+validation needs peak-memory measurements and sustained startup/refresh/AI/PDF
+workloads within the 512 MB budget. See [OPERATIONS.md](docs/OPERATIONS.md) for
+the incident, checks and proposed follow-up. This entry preserves the earlier
+functional evidence while recording the later reliability failure.

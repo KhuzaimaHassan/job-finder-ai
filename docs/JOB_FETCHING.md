@@ -111,7 +111,14 @@ Job-list/matching requests return 503 during initial warming rather than present
 
 On a new installation run [supabase_setup.sql](../supabase_setup.sql). On an existing installation apply [20261028_ingestion.sql](../backend/migrations/20261028_ingestion.sql) before deploying this release. It adds metadata and private ingestion tables/RPC, preserves all existing user/jobs data, and grants the lease only to `service_role`. No administrative ingestion secret is sent to the browser or GitHub workflow.
 
-The [Render free-instance limitations](https://render.com/docs/free) still affect latency when waking a sleeping service. Multiple API processes have separate snapshots, but the shared database lease/budgets prevent duplicate provider runs; minute reloads bring each cache up to date. Only start one local fixture per test port.
+The [Render free-instance limitations](https://render.com/docs/free) affect latency
+when waking a sleeping service. Multiple API processes have separate snapshots,
+while the shared database lease/budgets prevent duplicate provider runs. The
+current minute coordinator reloads a full database snapshot before checking source
+budgets; its cost remains even when no provider is due. This is a candidate for
+optimization after the confirmed 31 October memory-limit restart, not a verified
+memory-efficient design. See [operations and the open incident](OPERATIONS.md).
+Only start one local fixture per test port.
 
 Read-only diagnostics, from `backend/`:
 
@@ -124,9 +131,13 @@ The optional database comparison reads the configured public jobs table; confirm
 
 For scheduled-run investigation, use the GitHub workflow log and the private `job_fetch_runs` / `job_ingestion_state` records. A healthy HTTP response alone does not certify all providers refreshed successfully. Test evidence and outstanding provider/environment limits belong in [VERIFICATION.md](../VERIFICATION.md).
 
-The verification workflow keeps genuine provider failures red and prints source
-error categories without waiting for buffered output. Re-running verification
-does not clear historical failed-source state or bypass durable provider
+The verification workflow fails on a coordinator error, a provider whose status
+is `failed`, or readiness not completing within its window. It prints source
+error categories without waiting for buffered output. A `partial` source can
+still pass, including one with an error after some records were saved. Inspect
+each source's error, attempt/success times and coverage flags; a green run does
+not prove all sources completed or establish memory stability. Re-running
+verification does not clear historical failed-source state or bypass durable
 cooldowns. After a failed attempt, the failed state remains visible until the
 next eligible source refresh completes; an old failed Actions run remains in
 GitHub's history after a fix.
