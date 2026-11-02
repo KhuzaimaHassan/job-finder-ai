@@ -30,9 +30,6 @@ Open the assistant from a job to access resume compatibility estimates, cover-le
 
 ![AI Co-Pilot tools on the deployed Job Finder AI application](docs/assets/screenshots/ai-copilot-vercel.jpg)
 
-<details>
-<summary><strong>Explore job details and the application tracker</strong></summary>
-
 ### A closer look at a role
 
 Review the company, location, skills, compensation, and description before preparing your application. This captured listing is archived; its availability warning remains visible.
@@ -44,8 +41,6 @@ Review the company, location, skills, compensation, and description before prepa
 The tracker brings application stages and progress totals together. This screenshot shows its empty state before any jobs have been saved.
 
 ![Deployed application tracker with progress totals and an empty stage board](docs/assets/screenshots/applications-vercel.jpg)
-
-</details>
 
 ## What you can do
 
