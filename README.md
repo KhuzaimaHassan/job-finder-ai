@@ -20,6 +20,33 @@ Job Finder AI brings the main parts of a job search together: discovering opport
 
 It focuses on **remote technology roles and Pakistan listings**, using your saved profile and uploaded resume to make the search more personal. You choose the opportunities to pursue and review the AI-generated material before using it.
 
+## See the live application
+
+Captured directly from the [Vercel deployment](https://ai-jobfinder.vercel.app/) on **November 2, 2026**. Open any image to view it at full size.
+
+### Your application Co-Pilot
+
+Open the assistant from a job to access resume compatibility estimates, cover-letter drafting, skills-gap analysis, and interview preparation.
+
+![AI Co-Pilot tools on the deployed Job Finder AI application](docs/assets/screenshots/ai-copilot-vercel.jpg)
+
+<details>
+<summary><strong>Explore job details and the application tracker</strong></summary>
+
+### A closer look at a role
+
+Review the company, location, skills, compensation, and description before preparing your application. This captured listing is archived; its availability warning remains visible.
+
+![Deployed job-detail page showing role information and its archived-listing warning](docs/assets/screenshots/job-detail-vercel.jpg)
+
+### Keep your search organized
+
+The tracker brings application stages and progress totals together. This screenshot shows its empty state before any jobs have been saved.
+
+![Deployed application tracker with progress totals and an empty stage board](docs/assets/screenshots/applications-vercel.jpg)
+
+</details>
+
 ## What you can do
 
 | | Capability | What it helps you do |
