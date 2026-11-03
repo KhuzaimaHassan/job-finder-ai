@@ -105,7 +105,8 @@ async def refresh_jobs():
         run_started, outcomes, run_id = False, {}, str(uuid4())
         sources, selected = {}, {}
         try:
-            # Reloading never clears the last-good snapshot on database failure.
+            # A successful load is reused for 15 minutes; same-process provider
+            # writes publish immediately. Failed loads retain the last-good data.
             await jf.reload_snapshot()
             client = jf._get_supabase_client()
             acquired = bool((await db_call(lambda: client.rpc("claim_job_refresh", {"p_owner": owner, "p_seconds": 600}).execute())).data)

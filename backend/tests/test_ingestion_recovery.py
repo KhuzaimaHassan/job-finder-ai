@@ -15,6 +15,7 @@ from tests.test_reliability import job
 class IngestionRecoveryTests(IsolatedAsyncioTestCase):
     def setUp(self):
         jf._job_store, jf._cache_loaded, jf._refresh_finished = {}, False, False
+        jf._snapshot_task, jf._last_snapshot_load = None, 0.0
         ingestion._status = {"running": False, "sources": {}, "last_completed_at": None}
 
     def providers(self, db, remote=None, remotive=None):

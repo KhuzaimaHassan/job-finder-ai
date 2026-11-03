@@ -26,6 +26,7 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         jf._job_store = {}
         jf._cache_loaded = False
         jf._refresh_finished = False
+        jf._snapshot_task, jf._last_snapshot_load = None, 0.0
         em._job_embeddings.clear()
         em._user_embeddings.clear()
 

@@ -24,6 +24,17 @@ python scripts/audit_freshness.py
 python scripts/audit_freshness.py --database --output ../freshness-report.json
 ```
 
+Measure startup snapshot reloads and peak resident memory without provider calls
+or database writes (from `backend/`, using the intended database environment):
+
+```bash
+python scripts/benchmark_snapshot.py --iterations 3
+```
+
+The probe imports the full API but does not start its scheduler. It forces the
+requested number of snapshot reads, tests Python search, then checks 20 cached
+ticks. Its memory readings are for the machine running the probe.
+
 When using `--database`, confirm that the configured Supabase project belongs to the API being audited. The report contains aggregate public job data, scans up to 50,000 DB rows, and marks that limit if reached. It does not invoke the scheduler, scrape providers, change rows, or prove recurring execution from one sample. API pagination is not transactionally consistent if a refresh occurs mid-audit.
 
 ## Disposable local browser fixture

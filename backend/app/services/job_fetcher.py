@@ -3,11 +3,13 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
 import re
+import time
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from app.config import settings
 from app.schemas.jobs import Job
-from app.services.job_normalization import contains_skill
+from app.services.job_normalization import contains_skill, plain_text
 from app.services.db_retry import db_call
 from app.services.job_policy import searchable, parse_date, query_score, relevant_role
 from app.services.job_sources import (fetch_adzuna_jobs, fetch_remoteok_jobs, fetch_remotive_jobs,
@@ -17,9 +19,13 @@ logger = logging.getLogger(__name__)
 _job_store: dict[str, Job] = {}
 _cache_loaded = False
 _refresh_finished = False
-_load_lock = asyncio.Lock()
+_snapshot_task: asyncio.Task | None = None
+_last_snapshot_load = 0.0
+SNAPSHOT_PAGE_SIZE = 200
 
 KNOWN_TAGS = ['Python', 'Machine Learning', 'Data Science', 'AI', 'Deep Learning', 'TensorFlow', 'PyTorch', 'Scikit-learn', 'NLP', 'Computer Vision', 'SQL', 'Pandas', 'NumPy', 'FastAPI', 'Django', 'Flask', 'Docker', 'AWS', 'GCP', 'Azure', 'React', 'Node.js', 'JavaScript', 'TypeScript', 'Spark', 'Airflow', 'Power BI', 'Tableau', 'R', 'HuggingFace', 'LLM', 'GPT', 'Transformer', 'Statistics', 'MLOps', 'ETL', 'Data Engineering', 'Streamlit', 'Kubernetes', 'Java', 'Go', 'Rust', 'C++']
+_TAG_NAMES = {tag.lower(): tag for tag in KNOWN_TAGS if tag not in ("R", "Go")}
+_TAG_PATTERN = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(tag) for tag in _TAG_NAMES) + r")(?!\w)", re.I)
 PAKISTAN_LOCATIONS = {'sargodha', 'lahore', 'abbottabad', 'mardan', 'bahawalpur', 'faisalabad', 'islamabad', 'sialkot', 'hyderabad, pakistan', 'peshawar', 'pakistan', 'rawalpindi', 'karachi', 'multan', 'gujranwala', 'quetta'}
 
 
@@ -29,15 +35,21 @@ def _get_supabase_client():
 
 
 def _extract_tags(text):
-    return [tag for tag in KNOWN_TAGS if contains_skill(text, tag)][:10]
+    text = plain_text(text)
+    found = {_TAG_NAMES[match.group().lower()] for match in _TAG_PATTERN.finditer(text)}
+    for tag in ("R", "Go"):
+        if contains_skill(text, tag, normalized=True):
+            found.add(tag)
+    return [tag for tag in KNOWN_TAGS if tag in found][:10]
 
 
 def _job_from_row(row):
     payload = {key: row[key] for key in Job.model_fields if key in row}
+    payload["description"] = (payload.get("description") or "")[:10000]
     for key in ("tags", "location_restrictions", "timezone_restrictions"):
         payload[key] = payload.get(key) or []
     payload["posted_date"] = parse_date(row.get("posted_date")).isoformat() if parse_date(row.get("posted_date")) else None
-    payload["tags"] = _extract_tags(f"{row.get('title', '')} {row.get('description', '')}")
+    payload["tags"] = _extract_tags(f"{row.get('title', '')} {payload['description']}")
     return Job(**payload)
 
 
@@ -49,18 +61,31 @@ def _is_relevant_job(job):
 
 def _load_persisted_jobs():
     client = _get_supabase_client()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.JOB_CACHE_MAX_AGE_DAYS)).isoformat()
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=settings.JOB_CACHE_MAX_AGE_DAYS)).isoformat()
+    # posted_date is a legacy text column with both date-only and ISO values.
+    # Use inclusive date bounds here, then enforce exact instants in searchable.
+    posted_cutoff = (now - timedelta(days=settings.JOB_POSTED_MAX_AGE_DAYS)).date().isoformat()
     jobs = []
-    for offset in range(0, 100000, 1000):
-        rows = client.table("jobs").select("*").gte("fetched_at", cutoff).order("id").range(offset, offset + 999).execute().data or []
+    for offset in range(0, 100000, SNAPSHOT_PAGE_SIZE):
+        rows = (client.table("jobs").select("*").gte("fetched_at", cutoff)
+                .gte("posted_date", posted_cutoff)
+                .or_(f"expires_at.is.null,expires_at.gt.{now.isoformat()}")
+                .order("id").range(offset, offset + SNAPSHOT_PAGE_SIZE - 1).execute().data or [])
         for row in rows:
             try:
+                # Reject stale/closed/legacy rows before HTML/tag processing and
+                # Pydantic normalization. Archived records remain in the DB.
+                policy = SimpleNamespace(**{key: row.get(key) for key in
+                    ("source", "provider_id", "expires_at", "fetched_at", "posted_date", "availability")})
+                if not searchable(policy, now):
+                    continue
                 job = _job_from_row(row)
                 if _is_relevant_job(job):
                     jobs.append(job)
             except (ValueError, TypeError):
                 logger.warning("Skipped invalid persisted job")
-        if len(rows) < 1000:
+        if len(rows) < SNAPSHOT_PAGE_SIZE:
             return jobs
     raise RuntimeError("Job snapshot load exceeded its safety limit")
 
@@ -73,7 +98,8 @@ def publish_snapshot(jobs):
     global _job_store, _cache_loaded
     # Include location and contract in vacancy identity; source IDs remain stored.
     unique = {}
-    for job in sorted(jobs, key=lambda j: (j.posted_date or "", j.id), reverse=True):
+    now = datetime.now(timezone.utc)
+    for job in sorted((job for job in jobs if searchable(job, now)), key=lambda j: (j.posted_date or "", j.id), reverse=True):
         geo = job.location
         if job.job_type == "remote" and geo.lower() in ("remote", "worldwide", "anywhere", "global"):
             geo = "global"
@@ -86,10 +112,27 @@ def publish_snapshot(jobs):
     _cache_loaded = True
 
 
-async def reload_snapshot():
-    async with _load_lock:
-        jobs = await fetch_jobs_from_supabase()
-        publish_snapshot(jobs)
+async def _reload_snapshot():
+    global _last_snapshot_load
+    started = time.monotonic()
+    jobs = await fetch_jobs_from_supabase()
+    publish_snapshot(jobs)
+    _last_snapshot_load = time.monotonic()
+    logger.info("Search snapshot loaded: %d jobs in %.2fs", len(_job_store), _last_snapshot_load - started)
+
+
+async def reload_snapshot(*, force=False):
+    global _snapshot_task
+    # A timed-out waiter must not release a lock while its to_thread DB work
+    # continues. Every waiter shares the same task until that load finishes.
+    if _snapshot_task is not None and not _snapshot_task.done():
+        return await asyncio.shield(_snapshot_task)
+    if not force and _cache_loaded and time.monotonic() - _last_snapshot_load < settings.JOB_SNAPSHOT_RELOAD_SECONDS:
+        return
+    _snapshot_task = asyncio.create_task(_reload_snapshot())
+    # Retrieve failures even if all callers timed out; the next tick can retry.
+    _snapshot_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+    return await asyncio.shield(_snapshot_task)
 
 
 def cache_ready():

@@ -28,7 +28,8 @@ release, rather than treating a later docs-only main commit as a failed rollout.
 
 ## Open memory incident — investigated 1 November 2026
 
-**Status: unresolved; memory optimization has not been implemented or verified.**
+**Status: startup/refresh mitigation implemented on 3 November 2026; the original
+allocation-level cause and long-duration production memory stability remain unproven.**
 
 Render confirmed that the backend exceeded its **512 MB RAM** limit on
 31 October 2026 at **17:08:21 UTC / 10:08:21 PM PKT** and restarted. This occurred
@@ -42,7 +43,7 @@ reported `status: warming`, `ready: false` and `jobs_cached: 0` on that revision
 the process responded; they do not establish usable search or permanent data loss.
 
 Logs before the crash repeatedly reported skipped one-minute scheduler ticks
-because an earlier refresh execution was still running. Code inspection found:
+because an earlier refresh execution was still running. The 1 November code inspection found:
 
 - The coordinator reloads the full job snapshot before checking provider budgets.
 - Snapshot loading downloads full rows in 1,000-row pages and constructs a
@@ -51,12 +52,23 @@ because an earlier refresh execution was still running. Code inspection found:
 - Initial warm-up times out after eight seconds. Thread-based database work can
   outlive cancellation, which needs investigation for overlapping allocations.
 
-These are **candidate contributors, not a confirmed allocation-level cause**.
-Next work is to measure peak resident memory, reduce unnecessary reloads and
-hydrated data, and prevent overlapping startup loads. Exercise startup, repeated
-refreshes, matching and PDF/AI requests long enough to observe memory trends.
-Keep archived job details and saved applications intact while optimizing. Decide
-on compute capacity after measurement; no plan upgrade was made during the audit.
+These remain **candidate contributors, not a confirmed allocation-level cause**.
+On 3 November, current Render logs confirmed overlapping startup database loads:
+the timed-out worker continued while a second worker started. Local loading of
+the then-current catalogue took 101.9 seconds before the fix.
+
+The mitigation shares one cancellation-shielded loader, reuses successful loads
+for 15 minutes, filters stale/expired records before hydration, uses smaller pages,
+and extracts skill tags without repeatedly stripping HTML for every known tag.
+Only searchable records are retained in memory; database history is preserved.
+Local read-only measurements with all API modules imported loaded 1,727 jobs in
+19.37, 16.08 and 11.34 seconds across three reloads. The Windows process peaked at
+172.8 MiB resident memory; 20 cached ticks took less than a millisecond and did
+not reload the database. These are local measurements, not Render memory readings
+or a concurrent PDF/AI load test. See [verification history](VERIFICATION.md).
+
+Continue monitoring startup, provider refreshes, matching and PDF/AI requests
+over sustained use. No plan upgrade or history deletion was made.
 
 ## How to interpret a check
 
