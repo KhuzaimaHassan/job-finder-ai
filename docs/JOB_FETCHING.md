@@ -18,7 +18,7 @@ This guide describes the ingestion/search implementation. The earlier [28 Octobe
 
 ## Refresh coordination and schedule
 
-The API warms its snapshot from Supabase before declaring readiness when possible. It checks refresh state each minute while running; **that does not mean it calls providers each minute**.
+The API warms its snapshot from Supabase before declaring readiness when possible. A shared load continues after the eight-second startup wait expires; the coordinator joins it instead of starting a second database worker. It checks refresh state each minute while running; **that does not mean it calls providers each minute**.
 
 A database RPC atomically claims a bounded global lease. `job_ingestion_state.sources` persists per-source attempts, next due times, last successes, outcome/count, errors and coverage caps. Attempts are reserved before requests, so a restart cannot immediately replay a consumed provider slot. `job_fetch_runs` stores durable run outcomes. A lease eventually expires if a process crashes.
 
@@ -116,10 +116,15 @@ On a new installation run [supabase_setup.sql](../supabase_setup.sql). On an exi
 The [Render free-instance limitations](https://render.com/docs/free) affect latency
 when waking a sleeping service. Multiple API processes have separate snapshots,
 while the shared database lease/budgets prevent duplicate provider runs. The
-current minute coordinator reloads a full database snapshot before checking source
-budgets; its cost remains even when no provider is due. This is a candidate for
-optimization after the confirmed 31 October memory-limit restart, not a verified
-memory-efficient design. See [operations and the open incident](OPERATIONS.md).
+minute coordinator reuses a successfully loaded snapshot for 15 minutes by
+default (`JOB_SNAPSHOT_RELOAD_SECONDS`). Provider results in the same process
+publish immediately after persistence; changes written by another process become
+visible on the next eligible snapshot load. Loads use 200-row pages, apply
+publication/observation/expiry bounds before hydration, and retain only searchable
+records in memory. Failures retain the previous snapshot and remain retryable;
+read-time expiry still applies between reloads. Archived details remain in the
+database. See [operations and reliability](OPERATIONS.md) for the dated memory
+incident and limits of subsequent verification.
 Only start one local fixture per test port.
 
 Read-only diagnostics, from `backend/`:

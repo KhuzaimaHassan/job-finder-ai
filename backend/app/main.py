@@ -36,9 +36,13 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     """Warm search before readiness; durable budgets determine which sources are due."""
     try:
+        # reload_snapshot shields its shared worker from this waiter's timeout.
+        # The coordinator below joins that same load if it is still in flight.
         await asyncio.wait_for(reload_snapshot(), timeout=8)
-    except Exception:
+    except TimeoutError:
         logger.warning("Job snapshot is warming; readiness will return 503 until loaded")
+    except Exception:
+        logger.warning("Initial snapshot load failed; background coordinator will retry")
     initial = asyncio.create_task(fetch_all_jobs())
     scheduler.add_job(fetch_all_jobs, "interval", minutes=1, id="refresh_jobs", max_instances=1, coalesce=True)
     scheduler.start()

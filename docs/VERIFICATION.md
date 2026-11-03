@@ -255,3 +255,39 @@ validation needs peak-memory measurements and sustained startup/refresh/AI/PDF
 workloads within the 512 MB budget. See [OPERATIONS.md](OPERATIONS.md) for
 the incident, checks and proposed follow-up. This entry preserves the earlier
 functional evidence while recording the later reliability failure.
+
+## Startup and snapshot recovery — 3 November 2026
+
+The live frontend loaded, but `/api/ready` and Python job search returned 503
+with zero loaded jobs during repeated checks. Current Render logs showed a
+startup load continuing after its eight-second waiter timed out, followed by a
+second load of the same rows. Later minute ticks also reloaded the catalogue.
+
+Changes share one cancellation-shielded snapshot worker, reuse successful loads
+for 15 minutes, read 200-row pages with freshness/expiry filtering before costly
+hydration, and extract tags in one combined scan with the existing special R/Go
+rules. Searchable-only publication removes expired memory rows without deleting
+database history. Same-process provider results remain visible immediately;
+cross-process changes appear at the next eligible snapshot reload.
+
+Local validation before publication:
+
+- All 66 backend regression tests passed, including seven new startup/snapshot
+  tests for cancellation overlap, retries, load reuse, pagination, archive
+  preservation and skill-boundary equivalence.
+- The old read-only loader took 101.9 seconds for 1,858 records, of which only
+  1,733 were searchable. A subsequent full-API memory probe with the revised
+  loader returned 1,727 jobs across three loads in 19.37, 16.08 and 11.34 seconds.
+  Windows peak resident memory was 172.8 MiB; 20 cached ticks triggered no reload.
+  Catalogue changes and network/cache conditions make these diagnostic samples,
+  not a controlled performance guarantee or Render RAM measurement.
+- A loopback-only API used the real read-only catalogue loader with disposable
+  authentication/profile/storage and no provider scheduler. In the local browser,
+  all-jobs displayed 1,727 records, Python + Remote + Full-time returned 783, and
+  Matched for Me returned nine profile matches for the synthetic Python/SQL
+  candidate. No real candidate profile or resume was edited by that browser test.
+- Documentation links and `git diff --check` passed. No frontend code changed.
+
+The memory probe does not cover sustained concurrent resume parsing, AI
+generation, provider refreshes or months of free-tier usage. The original OOM
+allocation-level cause remains unconfirmed; continue monitoring production.

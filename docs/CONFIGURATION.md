@@ -16,6 +16,7 @@
 | `JOB_POSTED_MAX_AGE_DAYS` | Backend | Source publication/update age cap, default 30 |
 | `JOB_PROVIDER_MAX_PAGES` | Backend | Traversal budget per query, default 5, range 2–20; includes newest page and saved backfill |
 | `JOB_REFRESH_TIMEOUT_SECONDS` | Backend | Whole-run deadline, default 240 seconds |
+| `JOB_SNAPSHOT_RELOAD_SECONDS` | Backend | Minimum interval between successful full database snapshot loads, default 900 seconds (15 minutes), range 60–3600; same-process provider results publish immediately |
 | `FRONTEND_URL` | Backend | Allowed frontend origin for CORS; the verified production aliases `ai-jobfinder.vercel.app` and `job-finder-ai-kappa.vercel.app` are also allowed |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Backend | Optional Adzuna credentials |
 | `HIMALAYAS_API_KEY` | Backend only | Optional free key; anonymous API requests share a public allowance |

@@ -65,7 +65,15 @@ class MemoryQuery:
     def select(self, *_args): return self
     def eq(self, key, value): self.filters.append(lambda r: r.get(key) == value); return self
     def in_(self, key, values): self.filters.append(lambda r: r.get(key) in values); return self
-    def gte(self, key, value): self.filters.append(lambda r: r.get(key, "") >= value); return self
+    def gte(self, key, value): self.filters.append(lambda r: (r.get(key) or "") >= value); return self
+    def or_(self, expression):
+        # Snapshot expiry predicate used by PostgREST; exact policy is also
+        # checked in Python before hydrating jobs.
+        prefix = "expires_at.is.null,expires_at.gt."
+        assert expression.startswith(prefix), expression
+        cutoff = expression.removeprefix(prefix)
+        self.filters.append(lambda r: r.get("expires_at") is None or r["expires_at"] > cutoff)
+        return self
     def order(self, key, desc=False): self.ordering = (key, desc); return self
     def limit(self, n): self.maximum = n; return self
     def range(self, start, end): self.window = (start, end); return self

@@ -19,6 +19,7 @@ class IngestionMatchingTests(IsolatedAsyncioTestCase):
         jf._job_store = {}
         jf._cache_loaded = False
         jf._refresh_finished = False
+        jf._snapshot_task, jf._last_snapshot_load = None, 0.0
 
     def test_read_time_expiry_and_publication_age_and_unknown_status(self):
         now = datetime.now(timezone.utc)

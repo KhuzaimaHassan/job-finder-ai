@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     JOB_POSTED_MAX_AGE_DAYS: int = Field(30, ge=1, le=365)
     JOB_PROVIDER_MAX_PAGES: int = Field(5, ge=2, le=20)
     JOB_REFRESH_TIMEOUT_SECONDS: int = Field(240, ge=30, le=480)
+    JOB_SNAPSHOT_RELOAD_SECONDS: int = Field(900, ge=60, le=3600)
 
     # Frontend URL for CORS
     FRONTEND_URL: str = "http://localhost:3000"

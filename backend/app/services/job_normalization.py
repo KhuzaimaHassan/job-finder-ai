@@ -30,8 +30,9 @@ def work_arrangement(text: str, default: str | None) -> str | None:
     return default
 
 
-def contains_skill(text: str, tag: str) -> bool:
-    text = plain_text(text)
+def contains_skill(text: str, tag: str, *, normalized: bool = False) -> bool:
+    if not normalized:
+        text = plain_text(text)
     if tag == "R":
         return bool(re.search(r"(?<!\w)R(?!\w)|(?i:\brstudio\b)", text))
     if tag == "Go":
